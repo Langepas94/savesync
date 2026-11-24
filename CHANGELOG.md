@@ -61,4 +61,8 @@
   heartbeat; engine блокирует push/pull игры, залоченной другим
   устройством (`PushOutcome::Locked`/`PullOutcome::Locked`); демон
   отражает исход `locked` в SyncResult.
+- Custom-правила из CLI (schema §3): `savesync-daemon custom add|list|
+  remove`; манифесты `custom:<slug>` хранятся в `<state>/custom/*.yaml`,
+  подхватываются сканером и никогда не перезаписываются обновлением базы;
+  `Manifest::validate` принимает префикс `custom:` и ловит пустые pattern.
 - CI (GitHub Actions): fmt, clippy, test на Windows и Ubuntu.

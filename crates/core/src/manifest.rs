@@ -139,13 +139,46 @@ impl Manifest {
         self.paths.iter().filter(move |p| p.os.matches(platform))
     }
 
+    /// Custom-правило пользователя (schema §3): slug получает префикс
+    /// `custom:` и никогда не публикуется в репозитории манифестов.
+    pub fn custom(name: &str, paths: Vec<PathRule>) -> Result<Manifest, String> {
+        let m = Manifest {
+            schema: SCHEMA_VERSION,
+            name: name.to_string(),
+            slug: crate::game_key::custom_key(name),
+            aliases: Vec::new(),
+            ids: Ids::default(),
+            paths,
+            registry: Vec::new(),
+            portability: Portability::default(),
+        };
+        let errors = m.validate();
+        if errors.is_empty() {
+            Ok(m)
+        } else {
+            Err(errors.join("; "))
+        }
+    }
+
+    /// Сериализация в YAML (запись custom-правил, экспорт).
+    pub fn to_yaml(&self) -> Result<String, serde_yaml::Error> {
+        serde_yaml::to_string(self)
+    }
+
     /// Валидация записи (правила schema §6): версия, slug, причина для warn/blocked.
     pub fn validate(&self) -> Vec<String> {
         let mut errors = Vec::new();
         if self.schema != SCHEMA_VERSION {
             errors.push(format!("unsupported schema {}", self.schema));
         }
-        if !crate::game_key::is_valid_slug(&self.slug) {
+        // Пользовательские игры: `custom:<slug>` (schema §3) — валиден slug
+        // после префикса. В репозитории такие записи не публикуются.
+        let slug_ok = crate::game_key::is_valid_slug(&self.slug)
+            || self
+                .slug
+                .strip_prefix("custom:")
+                .is_some_and(crate::game_key::is_valid_slug);
+        if !slug_ok {
             errors.push(format!("invalid slug {:?}", self.slug));
         }
         if self.name.trim().is_empty() {
@@ -153,6 +186,14 @@ impl Manifest {
         }
         if self.paths.is_empty() && self.registry.is_empty() {
             errors.push("no paths".into());
+        }
+        if self
+            .paths
+            .iter()
+            .chain(&self.registry)
+            .any(|p| p.pattern.trim().is_empty())
+        {
+            errors.push("empty pattern".into());
         }
         if self.portability.status != PortabilityStatus::Ok && self.portability.reason.is_none() {
             errors.push("portability.warn/blocked requires reason".into());
@@ -170,6 +211,12 @@ pub struct ManifestDb {
 impl ManifestDb {
     pub fn from_entries(entries: Vec<Manifest>) -> Self {
         ManifestDb { entries }
+    }
+
+    /// Добавляет манифест, заменяя существующий с тем же slug.
+    pub fn insert(&mut self, m: Manifest) {
+        self.entries.retain(|e| e.slug != m.slug);
+        self.entries.push(m);
     }
 
     pub fn len(&self) -> usize {
@@ -334,5 +381,41 @@ paths:
         assert!(db.get("elden-ring").is_some());
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn custom_manifest_roundtrip() {
+        let m = Manifest::custom(
+            "My Indie Game",
+            vec![PathRule {
+                pattern: "<documents>/My Indie Game/saves".into(),
+                os: Os::Any,
+                tags: vec!["save".into()],
+            }],
+        )
+        .unwrap();
+        assert_eq!(m.slug, "custom:my-indie-game");
+        assert!(m.validate().is_empty());
+
+        // YAML round-trip: запись на диск и загрузка обратно.
+        let yaml = m.to_yaml().unwrap();
+        let parsed = parse_manifest_str(&yaml).unwrap();
+        assert_eq!(parsed.slug, m.slug);
+        assert_eq!(parsed.paths.len(), 1);
+        assert!(parsed.validate().is_empty());
+    }
+
+    #[test]
+    fn custom_manifest_rejects_empty_input() {
+        assert!(Manifest::custom("", vec![]).is_err());
+        assert!(Manifest::custom(
+            "X",
+            vec![PathRule {
+                pattern: "".into(),
+                os: Os::Any,
+                tags: vec![],
+            }],
+        )
+        .is_err());
     }
 }
