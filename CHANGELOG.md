@@ -35,6 +35,14 @@
   изменении контент-хеша), `pull` (merge индекса → политика конфликтов →
   авто-бэкап перед затиранием → распаковка), откат на конкретную версию.
   Интеграционные тесты «двух устройств» на FsBackend.
+- `savesync-core::config` — конфиг демона (config.json), стабильный
+  device_id, per-platform data dir; каналы независимы (M1: fs).
+- `savesync-core::ipc` — типы JSON-RPC протокола (status/scan/sync).
+- `savesync-daemon`: runtime (сканер → engine), команды `serve` / `scan` /
+  `sync [game]` / `status`; IPC-сервер JSON-RPC через interprocess
+  (namespaced: named pipe на Windows, abstract unix socket на Linux);
+  второй инстанс демона отклоняется; sync не создаёт ложных ветвлений —
+  устройство без локальных версий принимает удалённую линию.
 - Документ `docs/manifests-schema.md` — схема репозитория манифестов
   (формат YAML, правила slug'ов, структура репо, валидация).
 - CI (GitHub Actions): fmt, clippy, test на Windows и Ubuntu.

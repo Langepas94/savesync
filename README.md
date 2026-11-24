@@ -37,6 +37,18 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
 ```
 
+### Демон (M1)
+
+Конфиг: `%APPDATA%\savesync\config.json` / `~/.local/share/savesync/config.json`
+(создаётся при первом запуске; `manifests_dir`, `backends.fs_path`).
+
+```sh
+savesync-daemon serve        # фоновый демон (IPC: named pipe / unix socket)
+savesync-daemon scan         # найти игры
+savesync-daemon sync [игра]  # ручная синхронизация (всех или одной)
+savesync-daemon status       # статус демона
+```
+
 ## Установка
 
 > Разделы наполняются по ходу M4/M5 (см. HANDOFF §4).

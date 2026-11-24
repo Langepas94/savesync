@@ -12,5 +12,7 @@ pub mod snapshot;
 pub mod steam;
 
 pub mod backend;
+pub mod config;
 pub mod engine;
 pub mod index;
+pub mod ipc;

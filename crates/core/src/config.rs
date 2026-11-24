@@ -1,0 +1,158 @@
+//! Конфигурация демона: пути данных per-platform, device_id, каналы
+//! синхронизации. Файл — `<data_dir>/config.json`.
+//!
+//! Каналы независимы (plan §3): облако и LAN — отдельные блоки, можно
+//! любой/оба/ни одного (тогда только локальные бэкапы). M1: только
+//! `fs`-канал (локальная папка/USB) — облачные бэкенды в M2.
+
+use std::io;
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+
+use crate::paths::Platform;
+
+/// Директория данных приложения на этой машине.
+/// Windows: `%APPDATA%\savesync`, Linux/SteamOS: `~/.local/share/savesync`.
+pub fn data_dir(platform: Platform) -> Option<PathBuf> {
+    match platform {
+        Platform::Windows => std::env::var_os("APPDATA")
+            .map(PathBuf::from)
+            .map(|p| p.join("savesync")),
+        Platform::Linux => std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
+            .map(|p| p.join("savesync")),
+    }
+}
+
+/// Настройки бэкендов (каналов). Всё опционально и независимо.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackendsConfig {
+    /// Файловый канал M1 (папка/USB). Также эталон для тестов.
+    pub fs_path: Option<PathBuf>,
+    // M2: yandex: {...}, google: {...}; M3: lan: {...}
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Config {
+    pub version: u32,
+    /// Стабильный идентификатор устройства (генерируется при первом
+    /// запуске). Участвует в id версий и pairing.
+    pub device_id: String,
+    /// Человекочитаемое имя устройства для UI/pairing.
+    pub device_name: String,
+    /// Снапшот репозитория savesync-manifests (директория с деревом).
+    pub manifests_dir: Option<PathBuf>,
+    #[serde(default)]
+    pub backends: BackendsConfig,
+}
+
+impl Config {
+    pub fn load(path: &Path) -> io::Result<Option<Config>> {
+        match std::fs::read(path) {
+            Ok(bytes) => serde_json::from_slice(&bytes)
+                .map(Some)
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e)),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Загружает конфиг или создаёт новый (генерируя device_id).
+    pub fn load_or_init(path: &Path) -> io::Result<Config> {
+        if let Some(cfg) = Self::load(path)? {
+            return Ok(cfg);
+        }
+        let cfg = Config {
+            version: 1,
+            device_id: generate_device_id(),
+            device_name: hostname(),
+            manifests_dir: None,
+            backends: BackendsConfig::default(),
+        };
+        cfg.save(path)?;
+        Ok(cfg)
+    }
+
+    pub fn save(&self, path: &Path) -> io::Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(
+            &tmp,
+            serde_json::to_vec_pretty(self)
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
+        )?;
+        std::fs::rename(&tmp, path)
+    }
+}
+
+/// Читаемое имя хоста (COMPUTERNAME / HOSTNAME), fallback — "device".
+pub fn hostname() -> String {
+    std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "device".into())
+}
+
+/// Стабильный id: slug(hostname) + 8 hex от blake3(время, pid).
+/// Криптостойкость не требуется — это метка устройства, а не секрет.
+pub fn generate_device_id() -> String {
+    let host = crate::game_key::slugify(&hostname());
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(&nanos.to_le_bytes());
+    hasher.update(&std::process::id().to_le_bytes());
+    hasher.update(host.as_bytes());
+    let short: String = hasher.finalize().to_hex().chars().take(8).collect();
+    let host = if host.is_empty() {
+        "device".into()
+    } else {
+        host
+    };
+    format!("{host}-{short}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn init_persists_device_id() {
+        let dir = std::env::temp_dir().join(format!("savesync-test-config-{}", std::process::id()));
+        let path = dir.join("config.json");
+
+        let cfg = Config::load_or_init(&path).unwrap();
+        assert_eq!(cfg.version, 1);
+        assert!(!cfg.device_id.is_empty());
+
+        // Повторная загрузка — тот же device_id (стабильность).
+        let cfg2 = Config::load_or_init(&path).unwrap();
+        assert_eq!(cfg, cfg2);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn device_id_is_slug_prefixed() {
+        let id = generate_device_id();
+        let (host, suffix) = id.rsplit_once('-').unwrap();
+        assert_eq!(suffix.len(), 8);
+        assert!(suffix.chars().all(|c| c.is_ascii_hexdigit()));
+        assert!(crate::game_key::is_valid_slug(host) || host == "device");
+    }
+
+    #[test]
+    fn backends_are_optional_and_independent() {
+        let json =
+            r#"{"version":1,"device_id":"pc-abcd1234","device_name":"PC","manifests_dir":null}"#;
+        let cfg: Config = serde_json::from_str(json).unwrap();
+        assert!(cfg.backends.fs_path.is_none());
+    }
+}
