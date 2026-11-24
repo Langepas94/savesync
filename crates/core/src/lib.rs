@@ -7,3 +7,4 @@ pub mod game_key;
 pub mod hash;
 pub mod manifest;
 pub mod paths;
+pub mod scanner;
