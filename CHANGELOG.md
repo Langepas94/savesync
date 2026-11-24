@@ -17,6 +17,12 @@
 - `savesync-core`: сканер установленных игр (манифесты × корни системы,
   кроссплатформенная тестовая матрица Win/Linux).
 - `savesync-core`: blake3-хеширование файлов и снапшотов.
+- `savesync-core::steam`: парсер `appinfo.vdf` (v39–41, string table v41),
+  бинарный KeyValues, текстовый VDF (`appmanifest_*.acf`,
+  `libraryfolders.vdf`), обнаружение библиотек и Proton-префиксов
+  (`compatdata/<appid>`), матчинг установленных игр на манифесты
+  (`ids.steam` → fallback на slug имени).
+- `AGENTS.md` — роли крейтов и взаимодействие компонентов.
 - Документ `docs/manifests-schema.md` — схема репозитория манифестов
   (формат YAML, правила slug'ов, структура репо, валидация).
 - CI (GitHub Actions): fmt, clippy, test на Windows и Ubuntu.
