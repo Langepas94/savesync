@@ -32,9 +32,10 @@ fn main() {
             cmd_via_daemon_or_direct(Method::Sync { game_key: game })
         }
         Some("custom") => cmd_custom(&args[1..]),
+        Some("remote") => cmd_remote(&args[1..]),
         _ => {
             eprintln!(
-                "savesync-daemon {}\nкоманды: serve | status | scan | sync [game_key] | custom <add|list|remove>",
+                "savesync-daemon {}\nкоманды: serve | status | scan | sync [game_key] | custom <add|list|remove> | remote <setup|list>",
                 env!("CARGO_PKG_VERSION")
             );
             2
@@ -187,6 +188,87 @@ fn usage_custom() -> i32 {
          custom add <name> --path <паттерн> [--path ...] [--os any|windows|linux] [--tags save,config]\n  \
          custom list\n  \
          custom remove <slug>"
+    );
+    2
+}
+
+/// remote setup fs <path> | remote setup yandex <token> | remote list
+///
+/// Каналы независимы (plan §3): можно настроить любой набор.
+fn cmd_remote(args: &[String]) -> i32 {
+    use savesync_core::config::YandexConfig;
+
+    let path = config_path();
+    let mut config = match Config::load_or_init(&path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("config: {e}");
+            return 1;
+        }
+    };
+
+    match (
+        args.first().map(String::as_str),
+        args.get(1).map(String::as_str),
+    ) {
+        (Some("setup"), Some("fs")) => {
+            let Some(p) = args.get(2) else {
+                return usage_remote();
+            };
+            config.backends.fs_path = Some(PathBuf::from(p));
+        }
+        (Some("setup"), Some("yandex")) => {
+            let Some(token) = args.get(2) else {
+                return usage_remote();
+            };
+            config.backends.yandex = Some(YandexConfig {
+                token: token.clone(),
+            });
+        }
+        (Some("setup"), Some("yandex-off")) => {
+            config.backends.yandex = None;
+        }
+        (Some("setup"), Some("fs-off")) => {
+            config.backends.fs_path = None;
+        }
+        (Some("list"), _) => {
+            let fs = config
+                .backends
+                .fs_path
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "—".into());
+            let ya = if config.backends.yandex.is_some() {
+                "настроен"
+            } else {
+                "—"
+            };
+            println!("каналы синхронизации:\n  fs:          {fs}\n  yandex-disk: {ya}");
+            return 0;
+        }
+        _ => return usage_remote(),
+    }
+
+    match config.save(&path) {
+        Ok(()) => {
+            println!("канал сохранён");
+            0
+        }
+        Err(e) => {
+            eprintln!("ошибка записи конфига: {e}");
+            1
+        }
+    }
+}
+
+fn usage_remote() -> i32 {
+    eprintln!(
+        "использование:\n  \
+         remote setup fs <путь>     — файловый канал (папка/USB)\n  \
+         remote setup fs-off        — отключить файловый канал\n  \
+         remote setup yandex <токен> — Яндекс.Диск (OAuth-токен)\n  \
+         remote setup yandex-off    — отключить Яндекс.Диск\n  \
+         remote list                — показать настроенные каналы"
     );
     2
 }

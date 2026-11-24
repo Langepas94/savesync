@@ -4,7 +4,7 @@
 use std::io;
 use std::path::PathBuf;
 
-use savesync_core::backend::FsBackend;
+use savesync_core::backend::{Backend, FsBackend};
 use savesync_core::config::Config;
 use savesync_core::engine::{Engine, PullOutcome, PushOutcome};
 use savesync_core::ipc::{
@@ -13,6 +13,7 @@ use savesync_core::ipc::{
 use savesync_core::manifest::{Manifest, ManifestDb};
 use savesync_core::paths::{Platform, Roots};
 use savesync_core::scanner::{self, FoundGame};
+use savesync_core::yandex::YandexDisk;
 
 pub struct Runtime {
     pub config: Config,
@@ -62,18 +63,30 @@ impl Runtime {
         })
     }
 
-    fn engine(&self) -> Result<Engine<FsBackend>, String> {
-        let fs = self
-            .config
-            .backends
-            .fs_path
-            .clone()
-            .ok_or("канал синхронизации не настроен (backends.fs_path)")?;
-        Ok(Engine::new(
-            FsBackend::new(fs),
-            self.config.device_id.clone(),
-            self.state_dir.clone(),
-        ))
+    /// Каналы синхронизации (plan §3): настроенные бэкенды, каждый —
+    /// отдельный Engine. Каналы независимы: sync идёт по всем.
+    fn engines(&self) -> Result<Vec<Engine<Box<dyn Backend>>>, String> {
+        let mut out: Vec<Engine<Box<dyn Backend>>> = Vec::new();
+        if let Some(fs) = &self.config.backends.fs_path {
+            out.push(Engine::new(
+                Box::new(FsBackend::new(fs)) as Box<dyn Backend>,
+                self.config.device_id.clone(),
+                self.state_dir.clone(),
+            ));
+        }
+        if let Some(ya) = &self.config.backends.yandex {
+            out.push(Engine::new(
+                Box::new(YandexDisk::new(&ya.token)) as Box<dyn Backend>,
+                self.config.device_id.clone(),
+                self.state_dir.clone(),
+            ));
+        }
+        if out.is_empty() {
+            return Err(
+                "канал синхронизации не настроен (backends.fs_path / backends.yandex)".into(),
+            );
+        }
+        Ok(out)
     }
 
     /// Пересканировать систему. Возвращает найденные игры.
@@ -136,7 +149,7 @@ impl Runtime {
             });
         }
 
-        let engine = match self.engine() {
+        let engines = match self.engines() {
             Ok(e) => e,
             Err(msg) => {
                 return ResponsePayload::Sync(SyncPayload {
@@ -153,33 +166,45 @@ impl Runtime {
         };
 
         let mut results = Vec::new();
-        for game in targets {
-            results.push(sync_one(
-                &engine,
-                &self.manifests,
-                game,
-                self.platform,
-                &self.roots,
-            ));
+        for engine in &engines {
+            for game in &targets {
+                results.push(sync_one(
+                    engine,
+                    &self.manifests,
+                    game,
+                    self.platform,
+                    &self.roots,
+                ));
+            }
         }
         ResponsePayload::Sync(SyncPayload { results })
     }
 }
 
+/// Префикс канала в detail: при нескольких бэкендах результаты игры
+/// идут подряд, и без канала их не различить.
+fn with_channel(channel: &str, mut r: SyncResult) -> SyncResult {
+    if let Some(d) = r.detail {
+        r.detail = Some(format!("[{channel}] {d}"));
+    }
+    r
+}
+
 fn sync_one(
-    engine: &Engine<FsBackend>,
+    engine: &Engine<Box<dyn Backend>>,
     db: &ManifestDb,
     game: &FoundGame,
     platform: Platform,
     roots: &Roots,
 ) -> SyncResult {
+    let channel = engine.backend_name();
     let manifest: &Manifest = match db.get(&game.game_key) {
         Some(m) => m,
         None => {
             return SyncResult {
                 game_key: game.game_key.clone(),
                 outcome: "skipped".into(),
-                detail: Some("нет манифеста".into()),
+                detail: Some(format!("[{channel}] нет манифеста")),
             }
         }
     };
@@ -192,41 +217,47 @@ fn sync_one(
         engine.has_remote_versions(&game.game_key),
     ) {
         (Ok(false), Ok(true)) => {
-            return match engine.pull(manifest, roots, platform) {
-                Ok(PullOutcome::Applied { version, .. }) => SyncResult {
-                    game_key: game.game_key.clone(),
-                    outcome: "applied".into(),
-                    detail: Some(version),
+            return with_channel(
+                channel,
+                match engine.pull(manifest, roots, platform) {
+                    Ok(PullOutcome::Applied { version, .. }) => SyncResult {
+                        game_key: game.game_key.clone(),
+                        outcome: "applied".into(),
+                        detail: Some(version),
+                    },
+                    Ok(PullOutcome::UpToDate) => SyncResult {
+                        game_key: game.game_key.clone(),
+                        outcome: "up_to_date".into(),
+                        detail: None,
+                    },
+                    Ok(PullOutcome::Conflict(heads)) => SyncResult {
+                        game_key: game.game_key.clone(),
+                        outcome: "conflict".into(),
+                        detail: Some(heads.join(", ")),
+                    },
+                    Ok(PullOutcome::NoRemoteVersion) => unreachable!("remote checked above"),
+                    Ok(PullOutcome::Locked(holder)) => SyncResult {
+                        game_key: game.game_key.clone(),
+                        outcome: "locked".into(),
+                        detail: Some(holder),
+                    },
+                    Err(e) => SyncResult {
+                        game_key: game.game_key.clone(),
+                        outcome: "error".into(),
+                        detail: Some(e.to_string()),
+                    },
                 },
-                Ok(PullOutcome::UpToDate) => SyncResult {
-                    game_key: game.game_key.clone(),
-                    outcome: "up_to_date".into(),
-                    detail: None,
-                },
-                Ok(PullOutcome::Conflict(heads)) => SyncResult {
-                    game_key: game.game_key.clone(),
-                    outcome: "conflict".into(),
-                    detail: Some(heads.join(", ")),
-                },
-                Ok(PullOutcome::NoRemoteVersion) => unreachable!("remote checked above"),
-                Ok(PullOutcome::Locked(holder)) => SyncResult {
-                    game_key: game.game_key.clone(),
-                    outcome: "locked".into(),
-                    detail: Some(holder),
-                },
-                Err(e) => SyncResult {
+            );
+        }
+        (Err(e), _) => {
+            return with_channel(
+                channel,
+                SyncResult {
                     game_key: game.game_key.clone(),
                     outcome: "error".into(),
                     detail: Some(e.to_string()),
                 },
-            };
-        }
-        (Err(e), _) => {
-            return SyncResult {
-                game_key: game.game_key.clone(),
-                outcome: "error".into(),
-                detail: Some(e.to_string()),
-            };
+            );
         }
         _ => {}
     }
@@ -248,11 +279,14 @@ fn sync_one(
         (Ok(PushOutcome::Unchanged), Ok(PullOutcome::UpToDate)) => ("up_to_date", None),
         (Ok(PushOutcome::Unchanged), Ok(PullOutcome::NoRemoteVersion)) => ("up_to_date", None),
     };
-    SyncResult {
-        game_key: game.game_key.clone(),
-        outcome: outcome.into(),
-        detail,
-    }
+    with_channel(
+        channel,
+        SyncResult {
+            game_key: game.game_key.clone(),
+            outcome: outcome.into(),
+            detail,
+        },
+    )
 }
 
 #[cfg(test)]
@@ -294,6 +328,7 @@ mod tests {
                     manifests_dir: None,
                     backends: BackendsConfig {
                         fs_path: Some(self.dir.join("remote")),
+                        ..BackendsConfig::default()
                     },
                 },
                 manifests: ManifestDb::from_entries(vec![manifest]),

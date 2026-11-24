@@ -31,7 +31,17 @@ pub fn data_dir(platform: Platform) -> Option<PathBuf> {
 pub struct BackendsConfig {
     /// Файловый канал M1 (папка/USB). Также эталон для тестов.
     pub fs_path: Option<PathBuf>,
-    // M2: yandex: {...}, google: {...}; M3: lan: {...}
+    /// Яндекс.Диск (M2): OAuth-токен. Каналы независимы — можно
+    /// настроить любой набор (plan §3).
+    pub yandex: Option<YandexConfig>,
+    // M2: google: {...}; M3: lan: {...}
+}
+
+/// Канал Яндекс.Диска.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct YandexConfig {
+    /// OAuth-токен (scope cloud-api:disk.app_folder или disk).
+    pub token: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
