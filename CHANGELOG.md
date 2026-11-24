@@ -75,4 +75,10 @@
   `Backend` реализован для `Box<dyn Backend>`.
 - CLI `remote setup fs|yandex [off]` и `remote list` — настройка каналов
   без правки конфига руками.
+- `savesync-core::gdrive` — бэкенд Google Drive (M2): Drive API v3,
+  скрытая область `appDataFolder`, резолв путей name→file id с кешем,
+  перезапись без дубликатов; access token из конфига
+  `backends.google.token` (refresh-flow — после получения client
+  id/secret). Mock-тесты: roundtrip API + engine поверх mock-облака;
+  CLI `remote setup google <token>` / `google-off`.
 - CI (GitHub Actions): fmt, clippy, test на Windows и Ubuntu.

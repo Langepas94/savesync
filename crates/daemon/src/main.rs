@@ -196,7 +196,7 @@ fn usage_custom() -> i32 {
 ///
 /// Каналы независимы (plan §3): можно настроить любой набор.
 fn cmd_remote(args: &[String]) -> i32 {
-    use savesync_core::config::YandexConfig;
+    use savesync_core::config::{GoogleConfig, YandexConfig};
 
     let path = config_path();
     let mut config = match Config::load_or_init(&path) {
@@ -228,6 +228,17 @@ fn cmd_remote(args: &[String]) -> i32 {
         (Some("setup"), Some("yandex-off")) => {
             config.backends.yandex = None;
         }
+        (Some("setup"), Some("google")) => {
+            let Some(token) = args.get(2) else {
+                return usage_remote();
+            };
+            config.backends.google = Some(GoogleConfig {
+                token: token.clone(),
+            });
+        }
+        (Some("setup"), Some("google-off")) => {
+            config.backends.google = None;
+        }
         (Some("setup"), Some("fs-off")) => {
             config.backends.fs_path = None;
         }
@@ -243,7 +254,14 @@ fn cmd_remote(args: &[String]) -> i32 {
             } else {
                 "—"
             };
-            println!("каналы синхронизации:\n  fs:          {fs}\n  yandex-disk: {ya}");
+            let gg = if config.backends.google.is_some() {
+                "настроен"
+            } else {
+                "—"
+            };
+            println!(
+                "каналы синхронизации:\n  fs:           {fs}\n  yandex-disk:  {ya}\n  google-drive: {gg}"
+            );
             return 0;
         }
         _ => return usage_remote(),

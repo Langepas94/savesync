@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use savesync_core::backend::{Backend, FsBackend};
 use savesync_core::config::Config;
 use savesync_core::engine::{Engine, PullOutcome, PushOutcome};
+use savesync_core::gdrive::GoogleDrive;
 use savesync_core::ipc::{
     GameStatus, ResponsePayload, ScanPayload, ScannedGame, StatusPayload, SyncPayload, SyncResult,
 };
@@ -81,9 +82,16 @@ impl Runtime {
                 self.state_dir.clone(),
             ));
         }
+        if let Some(gg) = &self.config.backends.google {
+            out.push(Engine::new(
+                Box::new(GoogleDrive::new(&gg.token)) as Box<dyn Backend>,
+                self.config.device_id.clone(),
+                self.state_dir.clone(),
+            ));
+        }
         if out.is_empty() {
             return Err(
-                "канал синхронизации не настроен (backends.fs_path / backends.yandex)".into(),
+                "канал синхронизации не настроен (backends.fs_path / yandex / google)".into(),
             );
         }
         Ok(out)
