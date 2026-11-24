@@ -12,6 +12,7 @@ pub mod snapshot;
 pub mod steam;
 
 pub mod backend;
+pub mod backup;
 pub mod config;
 pub mod engine;
 pub mod gdrive;

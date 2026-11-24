@@ -82,6 +82,21 @@ pub struct Config {
     pub manifests_dir: Option<PathBuf>,
     #[serde(default)]
     pub backends: BackendsConfig,
+    #[serde(default)]
+    pub backups: BackupsSettings,
+}
+
+/// Настройки пользовательских бэкапов (plan §2.2).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackupsSettings {
+    /// Папка бэкапов по умолчанию (для `backup create` без аргумента и
+    /// авто-бэкапов по расписанию).
+    pub dir: Option<PathBuf>,
+    /// Retention: сколько файлов бэкапов на игру хранить (по умолчанию 10).
+    pub keep: Option<u32>,
+    /// Интервал авто-бэкапов в часах (None — выключены; serve проверяет
+    /// раз в полчаса и делает бэкап, если интервал прошёл).
+    pub auto_interval_hours: Option<u32>,
 }
 
 impl Config {
@@ -106,6 +121,7 @@ impl Config {
             device_name: hostname(),
             manifests_dir: None,
             backends: BackendsConfig::default(),
+            backups: BackupsSettings::default(),
         };
         cfg.save(path)?;
         Ok(cfg)
