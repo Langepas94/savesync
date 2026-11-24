@@ -65,4 +65,14 @@
   remove`; манифесты `custom:<slug>` хранятся в `<state>/custom/*.yaml`,
   подхватываются сканером и никогда не перезаписываются обновлением базы;
   `Manifest::validate` принимает префикс `custom:` и ловит пустые pattern.
+- `savesync-core::yandex` — бэкенд Яндекс.Диска (M2): REST API
+  cloud-api.yandex.net (mkdir/upload/download/list), OAuth-токен из
+  конфига `backends.yandex.token`, маппинг ошибок (401/403 →
+  PermissionDenied, 404 → NotFound); тесты на встроенном mock HTTP-сервере,
+  включая полный цикл engine push→pull поверх него.
+- Каналы независимы (plan §3): демон гоняет sync по всем настроенным
+  бэкендам (`fs`, `yandex-disk`), в detail результата — имя канала;
+  `Backend` реализован для `Box<dyn Backend>`.
+- CLI `remote setup fs|yandex [off]` и `remote list` — настройка каналов
+  без правки конфига руками.
 - CI (GitHub Actions): fmt, clippy, test на Windows и Ubuntu.

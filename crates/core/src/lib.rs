@@ -16,3 +16,4 @@ pub mod config;
 pub mod engine;
 pub mod index;
 pub mod ipc;
+pub mod yandex;

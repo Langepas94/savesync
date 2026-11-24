@@ -74,6 +74,11 @@ impl<B: Backend> Engine<B> {
         }
     }
 
+    /// Имя канала синхронизации (для логов и отчётов sync).
+    pub fn backend_name(&self) -> &'static str {
+        self.backend.name()
+    }
+
     fn local_index_path(&self) -> PathBuf {
         self.state_dir.join("index.json")
     }
