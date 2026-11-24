@@ -126,6 +126,24 @@ impl<B: Backend> Engine<B> {
         Ok(())
     }
 
+    /// Есть ли у игры локальные версии (устройство уже синхронизировало её).
+    pub fn has_local_versions(&self, game_key: &str) -> io::Result<bool> {
+        Ok(self
+            .load_local()?
+            .game(game_key)
+            .map(|g| !g.versions.is_empty())
+            .unwrap_or(false))
+    }
+
+    /// Есть ли у игры версии на бэкенде.
+    pub fn has_remote_versions(&self, game_key: &str) -> Result<bool, EngineError> {
+        Ok(self
+            .load_remote()?
+            .game(game_key)
+            .map(|g| !g.versions.is_empty())
+            .unwrap_or(false))
+    }
+
     /// Выгрузка: снапшот → бэкенд → обновление локального и общего индексов.
     pub fn push(
         &self,
