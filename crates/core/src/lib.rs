@@ -14,6 +14,7 @@ pub mod steam;
 pub mod backend;
 pub mod config;
 pub mod engine;
+pub mod gdrive;
 pub mod index;
 pub mod ipc;
 pub mod yandex;

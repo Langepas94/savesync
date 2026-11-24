@@ -34,13 +34,23 @@ pub struct BackendsConfig {
     /// Яндекс.Диск (M2): OAuth-токен. Каналы независимы — можно
     /// настроить любой набор (plan §3).
     pub yandex: Option<YandexConfig>,
-    // M2: google: {...}; M3: lan: {...}
+    /// Google Drive (M2): OAuth access token. Refresh-flow — после
+    /// получения client id/secret (plan §6 «OAuth»).
+    pub google: Option<GoogleConfig>,
+    // M3: lan: {...}
 }
 
 /// Канал Яндекс.Диска.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct YandexConfig {
     /// OAuth-токен (scope cloud-api:disk.app_folder или disk).
+    pub token: String,
+}
+
+/// Канал Google Drive.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GoogleConfig {
+    /// OAuth access token (scope drive.appdata).
     pub token: String,
 }
 
