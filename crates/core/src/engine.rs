@@ -19,6 +19,7 @@ use crate::manifest::Manifest;
 use crate::paths::{resolve_pattern_multi, Platform, Roots};
 use crate::scanner::SaveLocation;
 use crate::snapshot;
+use crate::snapshot::now_millis;
 
 #[derive(Debug, Error)]
 pub enum EngineError {
@@ -35,6 +36,8 @@ pub enum PushOutcome {
     /// Контент не изменился — новая версия не создана.
     Unchanged,
     Uploaded(Version),
+    /// Игра залочена другим устройством (свежий heartbeat).
+    Locked(String),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -50,6 +53,8 @@ pub enum PullOutcome {
     Conflict(Vec<String>),
     /// На бэкенде нет версий этой игры.
     NoRemoteVersion,
+    /// Игра залочена другим устройством (свежий heartbeat).
+    Locked(String),
 }
 
 /// Движок синхронизации одного устройства.
@@ -144,12 +149,44 @@ impl<B: Backend> Engine<B> {
             .unwrap_or(false))
     }
 
+    /// Захват/продление лока игры в общем индексе (plan §2.1).
+    /// false — игру держит другое устройство со свежим heartbeat.
+    pub fn lock_game(&self, game_key: &str) -> Result<bool, EngineError> {
+        let mut remote = self.load_remote()?;
+        let acquired = remote.acquire_lock(game_key, &self.device_id, now_millis());
+        if acquired {
+            self.save_remote(&remote)?;
+        }
+        Ok(acquired)
+    }
+
+    /// Снятие своего лока (чужой не трогаем).
+    pub fn unlock_game(&self, game_key: &str) -> Result<(), EngineError> {
+        let mut remote = self.load_remote()?;
+        remote.release_lock(game_key, &self.device_id);
+        self.save_remote(&remote)
+    }
+
+    /// Кто держит свежий лок игры, если это не мы.
+    pub fn foreign_lock(&self, game_key: &str) -> Result<Option<String>, EngineError> {
+        let remote = self.load_remote()?;
+        Ok(remote
+            .lock_holder(game_key, now_millis())
+            .filter(|l| l.device != self.device_id)
+            .map(|l| l.device.clone()))
+    }
+
     /// Выгрузка: снапшот → бэкенд → обновление локального и общего индексов.
     pub fn push(
         &self,
         game_key: &str,
         locations: &[SaveLocation],
     ) -> Result<PushOutcome, EngineError> {
+        // Игра запущена на другом устройстве — ждём (plan §2.1).
+        if let Some(holder) = self.foreign_lock(game_key)? {
+            return Ok(PushOutcome::Locked(holder));
+        }
+
         let tmp_dir = self.state_dir.join("tmp");
         std::fs::create_dir_all(&tmp_dir)?;
         let tmp_snap = tmp_dir.join(format!("{game_key}.zip"));
@@ -196,6 +233,11 @@ impl<B: Backend> Engine<B> {
         platform: Platform,
     ) -> Result<PullOutcome, EngineError> {
         let game_key = manifest.slug.as_str();
+        // Игра запущена на другом устройстве — не затираем её сейвы.
+        if let Some(holder) = self.foreign_lock(game_key)? {
+            return Ok(PullOutcome::Locked(holder));
+        }
+
         let mut local = self.load_local()?;
         let remote = self.load_remote()?;
         local.merge(&remote);
@@ -470,6 +512,53 @@ mod tests {
             pc.engine.push("test-game", &pc.locations()).unwrap(),
             PushOutcome::Unchanged
         );
+    }
+
+    #[test]
+    fn foreign_lock_blocks_push_and_pull() {
+        let world = World::new("locked");
+        let pc = world.device("pc");
+        let deck = world.device("deck");
+        let m = manifest();
+
+        // PC залочил игру (игра запущена на PC).
+        assert!(pc.engine.lock_game("test-game").unwrap());
+        assert_eq!(
+            deck.engine.foreign_lock("test-game").unwrap().as_deref(),
+            Some("pc")
+        );
+
+        // Deck не может ни выгрузить, ни подтянуть.
+        deck.write_save("deck progress");
+        assert_eq!(
+            deck.engine.push("test-game", &deck.locations()).unwrap(),
+            PushOutcome::Locked("pc".into())
+        );
+        assert_eq!(
+            deck.engine
+                .pull(&m, &deck.roots, Platform::Windows)
+                .unwrap(),
+            PullOutcome::Locked("pc".into())
+        );
+
+        // Свой лок push'у не мешает; повторный захват продлевает heartbeat.
+        assert!(pc.engine.lock_game("test-game").unwrap());
+        pc.write_save("pc progress");
+        assert!(matches!(
+            pc.engine.push("test-game", &pc.locations()).unwrap(),
+            PushOutcome::Uploaded(_)
+        ));
+
+        // Снятие лока отпускает игру.
+        pc.engine.unlock_game("test-game").unwrap();
+        assert_eq!(deck.engine.foreign_lock("test-game").unwrap(), None);
+        assert!(matches!(
+            deck.engine
+                .pull(&m, &deck.roots, Platform::Windows)
+                .unwrap(),
+            PullOutcome::Applied { .. }
+        ));
+        assert_eq!(deck.read_save(), "pc progress");
     }
 
     #[test]

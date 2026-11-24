@@ -56,4 +56,9 @@
   манифестов, сгенерированных из реального appinfo.
 - `savesync-core::steam::kv_binary`: lossy-декодирование строк (реальный
   appinfo содержит не-UTF8 байты).
+- Локи в индексе (plan §2.1): `Index::acquire_lock/release_lock/
+  lock_holder` с heartbeat и протуханием (120 с); merge хранит свежайший
+  heartbeat; engine блокирует push/pull игры, залоченной другим
+  устройством (`PushOutcome::Locked`/`PullOutcome::Locked`); демон
+  отражает исход `locked` в SyncResult.
 - CI (GitHub Actions): fmt, clippy, test на Windows и Ubuntu.

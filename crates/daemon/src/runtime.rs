@@ -198,6 +198,11 @@ fn sync_one(
                     detail: Some(heads.join(", ")),
                 },
                 Ok(PullOutcome::NoRemoteVersion) => unreachable!("remote checked above"),
+                Ok(PullOutcome::Locked(holder)) => SyncResult {
+                    game_key: game.game_key.clone(),
+                    outcome: "locked".into(),
+                    detail: Some(holder),
+                },
                 Err(e) => SyncResult {
                     game_key: game.game_key.clone(),
                     outcome: "error".into(),
@@ -223,6 +228,8 @@ fn sync_one(
         (_, Ok(PullOutcome::Conflict(heads))) => ("conflict", Some(heads.join(", "))),
         (Err(e), _) => ("error", Some(e.to_string())),
         (_, Err(e)) => ("error", Some(e.to_string())),
+        (Ok(PushOutcome::Locked(holder)), _) => ("locked", Some(holder)),
+        (_, Ok(PullOutcome::Locked(holder))) => ("locked", Some(holder)),
         (Ok(PushOutcome::Uploaded(v)), _) => ("uploaded", Some(v.id)),
         (Ok(PushOutcome::Unchanged), Ok(PullOutcome::Applied { version, .. })) => {
             ("applied", Some(version))

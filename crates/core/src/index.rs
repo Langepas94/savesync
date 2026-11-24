@@ -22,6 +22,20 @@ pub enum ConflictPolicy {
     KeepBoth,
 }
 
+/// Лок игры (plan §2.1): пока игра запущена на устройстве, её game_key
+/// залочен в общем индексе; другие устройства не синхронизируют её.
+/// Лок снимается явно либо протухает по heartbeat.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GameLock {
+    pub device: String,
+    /// Последний heartbeat, unix millis.
+    pub heartbeat: u64,
+}
+
+/// Лок без heartbeat дольше этого интервала считается протухшим
+/// (устройство выключилось, не сняв лок).
+pub const LOCK_STALE_MS: u64 = 120_000;
+
 /// Одна версия снапшота в линии игры.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Version {
@@ -88,6 +102,9 @@ pub struct Index {
     pub version: u32,
     #[serde(default)]
     pub games: BTreeMap<String, GameIndex>,
+    /// Локи игр: game_key -> держатель. Живут в общем индексе бэкенда.
+    #[serde(default)]
+    pub locks: BTreeMap<String, GameLock>,
 }
 
 impl Index {
@@ -95,6 +112,7 @@ impl Index {
         Index {
             version: 1,
             games: BTreeMap::new(),
+            locks: BTreeMap::new(),
         }
     }
 
@@ -104,6 +122,38 @@ impl Index {
 
     pub fn game_mut(&mut self, game_key: &str) -> &mut GameIndex {
         self.games.entry(game_key.to_string()).or_default()
+    }
+
+    /// Захват/продление лока (heartbeat = now). Перезахват чужого
+    /// свежего лока запрещён — возвращает false.
+    pub fn acquire_lock(&mut self, game_key: &str, device: &str, now: u64) -> bool {
+        if let Some(holder) = self.lock_holder(game_key, now) {
+            if holder.device != device {
+                return false;
+            }
+        }
+        self.locks.insert(
+            game_key.to_string(),
+            GameLock {
+                device: device.to_string(),
+                heartbeat: now,
+            },
+        );
+        true
+    }
+
+    /// Снятие лока; чужой лок не трогаем.
+    pub fn release_lock(&mut self, game_key: &str, device: &str) {
+        if self.locks.get(game_key).map(|l| l.device.as_str()) == Some(device) {
+            self.locks.remove(game_key);
+        }
+    }
+
+    /// Держатель свежего лока (протухшие игнорируются).
+    pub fn lock_holder(&self, game_key: &str, now: u64) -> Option<&GameLock> {
+        self.locks
+            .get(game_key)
+            .filter(|l| now.saturating_sub(l.heartbeat) < LOCK_STALE_MS)
     }
 
     /// Добавляет версию; дедупликация по id и по hash+parent
@@ -131,6 +181,16 @@ impl Index {
             for v in &other_game.versions {
                 if game.get(&v.id).is_none() {
                     game.versions.push(v.clone());
+                }
+            }
+        }
+        // Локи: побеждает свежайший heartbeat. Снятие лока через merge
+        // не распространяется — полагаемся на протухание (LOCK_STALE_MS).
+        for (game_key, other_lock) in &other.locks {
+            match self.locks.get(game_key) {
+                Some(own) if own.heartbeat >= other_lock.heartbeat => {}
+                _ => {
+                    self.locks.insert(game_key.clone(), other_lock.clone());
                 }
             }
         }
@@ -245,5 +305,60 @@ mod tests {
     fn version_id_format() {
         let id = version_id(1_700_000_000_000, "deck", "abcdef0123456789");
         assert_eq!(id, "v1700000000000_deck_abcdef01");
+    }
+
+    #[test]
+    fn lock_acquire_release_and_staleness() {
+        let mut idx = Index::new();
+        assert!(idx.acquire_lock("g", "pc", 1000));
+        // Чужое устройство не перехватывает свежий лок.
+        assert!(!idx.acquire_lock("g", "deck", 1001));
+        // Своё устройство продлевает heartbeat.
+        assert!(idx.acquire_lock("g", "pc", 2000));
+        assert_eq!(idx.lock_holder("g", 3000).unwrap().device, "pc");
+        // Чужой лок нельзя снять.
+        idx.release_lock("g", "deck");
+        assert!(idx.lock_holder("g", 3000).is_some());
+        // Свой — можно.
+        idx.release_lock("g", "pc");
+        assert!(idx.lock_holder("g", 3000).is_none());
+        // Протухший лок не держит игру.
+        assert!(idx.acquire_lock("g", "pc", 10_000));
+        assert!(idx.lock_holder("g", 10_000 + LOCK_STALE_MS).is_none());
+        assert!(idx.acquire_lock("g", "deck", 10_000 + LOCK_STALE_MS));
+    }
+
+    #[test]
+    fn merge_keeps_freshest_lock() {
+        let mut a = Index::new();
+        a.acquire_lock("g", "pc", 1000);
+        let mut b = Index::new();
+        b.acquire_lock("g", "deck", 2000);
+
+        a.merge(&b);
+        assert_eq!(a.locks["g"].device, "deck");
+        assert_eq!(a.locks["g"].heartbeat, 2000);
+        // Обратный merge не откатывает на более старый.
+        b.merge(&a);
+        assert_eq!(b.locks["g"].heartbeat, 2000);
+    }
+
+    #[test]
+    fn locks_survive_save_load() {
+        let dir = std::env::temp_dir().join(format!("savesync-test-locks-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("index.json");
+
+        let mut idx = Index::new();
+        idx.acquire_lock("elden-ring", "pc", 42);
+        idx.save(&path).unwrap();
+        let loaded = Index::load(&path).unwrap();
+        assert_eq!(loaded.locks["elden-ring"].heartbeat, 42);
+        // Старый индекс без поля locks читается как пустой набор.
+        let legacy = br#"{"version":1,"games":{}}"#;
+        let parsed: Index = serde_json::from_slice(legacy).unwrap();
+        assert!(parsed.locks.is_empty());
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
