@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SaveSync — Decky Quick Access</title>
+<style>
+  :root{
+    --bg-0:#171a21; --bg-1:#1b2838; --bg-2:#232e3d; --bg-3:#2a475e;
+    --accent:#66c0f4; --text-0:#fff; --text-1:#c7d5e0; --text-2:#8f98a0; --text-3:#636c75;
+    --ok:#5cba32; --warn:#e8a33d; --err:#d5463a;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;font-family:"Segoe UI",system-ui,sans-serif;-webkit-tap-highlight-color:transparent;}
+  body{background:#0d1017;display:flex;justify-content:center;align-items:center;height:100vh;}
+  .qam{width:360px;height:92vh;max-height:840px;background:var(--bg-0);border-left:1px solid #000;border-radius:14px 0 0 14px;box-shadow:-12px 0 40px rgba(0,0,0,.7);display:flex;flex-direction:column;overflow:hidden;position:relative;}
+
+  .focusable{outline:none;}
+  .focusable.focused{outline:3px solid var(--accent);outline-offset:-3px;border-radius:8px;background:var(--bg-2)!important;}
+
+  header{padding:16px 16px 12px;border-bottom:1px solid #10131a;flex-shrink:0;}
+  .h-title{display:flex;align-items:center;justify-content:space-between;}
+  .h-title b{color:var(--accent);font-size:17px;letter-spacing:.5px;}
+  .daemon{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:13px;color:var(--text-2);}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--ok);box-shadow:0 0 8px var(--ok);}
+  .daemon .right{margin-left:auto;color:var(--text-3);font-size:12px;}
+
+  .scroll{flex:1;overflow-y:auto;padding:12px;scrollbar-width:none;}
+  .scroll::-webkit-scrollbar{display:none;}
+
+  .sync-now{width:100%;padding:18px;font-size:17px;font-weight:700;border:none;border-radius:10px;background:linear-gradient(90deg,#47bfff,#1a9fff);color:#0b1621;display:flex;align-items:center;justify-content:center;gap:10px;cursor:pointer;}
+  .sync-now:active{transform:scale(.98);}
+  .sync-now .spin{display:none;animation:rot 1s linear infinite;}
+  @keyframes rot{to{transform:rotate(360deg);}}
+  .sync-now.busy{background:var(--bg-3);color:var(--text-1);}
+  .sync-now.busy .spin{display:inline-block;}
+
+  /* Индикация бэкапа — только информация, без управления */
+  .backup-note{display:flex;align-items:center;gap:8px;margin-top:10px;padding:9px 12px;border-radius:8px;background:var(--bg-1);font-size:12.5px;color:var(--text-2);}
+  .backup-note .b-ok{color:var(--ok);font-size:15px;}
+
+  .alert{display:none;margin-top:12px;padding:14px;border-radius:10px;background:rgba(213,70,58,.14);border:1px solid rgba(213,70,58,.5);color:var(--text-0);cursor:pointer;}
+  .alert.show{display:flex;align-items:center;gap:12px;}
+  .alert .big{font-size:24px;}
+  .alert .t{font-weight:700;font-size:14px;}
+  .alert .d{font-size:12px;color:var(--text-2);margin-top:2px;}
+
+  .sec-t{color:var(--text-3);font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:1px;margin:16px 4px 8px;}
+
+  .save-row{display:flex;align-items:center;gap:12px;min-height:64px;padding:10px 12px;background:var(--bg-1);border-radius:10px;margin-bottom:8px;cursor:pointer;border:1px solid transparent;}
+  .save-row .cov{width:44px;height:44px;border-radius:8px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;color:rgba(255,255,255,.9);}
+  .save-row .n{color:var(--text-0);font-weight:600;font-size:14.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .save-row .m{font-size:12px;color:var(--text-2);margin-top:3px;}
+  .st{font-size:18px;flex-shrink:0;}
+  .st.ok{color:var(--ok);} .st.warn{color:var(--warn);} .st.err{color:var(--err);} .st.cl{color:var(--accent);}
+
+  footer{flex-shrink:0;display:flex;border-top:1px solid #10131a;background:var(--bg-1);}
+  footer .tab{flex:1;padding:14px 0 12px;background:none;border:none;color:var(--text-2);font-size:12.5px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;}
+  footer .tab .i{font-size:19px;}
+  footer .tab.active{color:var(--accent);}
+  .pad-hint{text-align:center;font-size:11px;color:var(--text-3);padding:6px;background:var(--bg-1);}
+
+  .pin-screen{display:flex;flex-direction:column;align-items:center;padding:28px 16px;text-align:center;}
+  .pin-screen h2{color:var(--text-0);font-size:16px;margin-bottom:6px;}
+  .pin-screen p{color:var(--text-2);font-size:13px;line-height:1.5;}
+  .pin-digits{display:flex;gap:12px;margin:22px 0 10px;}
+  .pin-digits span{width:58px;height:76px;background:var(--bg-1);border:3px solid var(--accent);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:40px;font-weight:800;color:var(--text-0);}
+  .kbd{display:grid;grid-template-columns:repeat(3,84px);gap:10px;margin-top:14px;}
+  .kbd button{height:56px;font-size:24px;font-weight:700;background:var(--bg-2);border:1px solid var(--bg-3);color:var(--text-0);border-radius:10px;cursor:pointer;}
+  .kbd button.focused{background:var(--bg-3);outline:3px solid var(--accent);}
+  .kbd-hint{font-size:11.5px;color:var(--text-3);margin-top:12px;}
+
+  .page{display:none;} .page.active{display:block;}
+  .toast{position:absolute;left:12px;right:12px;bottom:84px;background:var(--bg-2);border:1px solid var(--ok);color:var(--ok);padding:12px 16px;border-radius:10px;font-size:13.5px;font-weight:600;display:none;text-align:center;z-index:10;}
+</style>
+</head>
+<body>
+<div class="qam" id="qam">
+
+  <header>
+    <div class="h-title"><b>◈ SaveSync</b><span style="font-size:12px;color:var(--text-3);">deck-artem</span></div>
+    <div class="daemon"><span class="dot"></span>Демон активен<span class="right">☁ Я.Диск ✓ · LAN 1</span></div>
+  </header>
+
+  <div class="scroll">
+    <!-- ═══ ГЛАВНАЯ ═══ -->
+    <div class="page active" id="page-home">
+      <button class="sync-now focusable" id="btnSync" onclick="syncNow()"><span class="spin">⟳</span><span id="syncLbl">⇅ Синхронизировать</span></button>
+
+      <div class="backup-note"><span class="b-ok">✓</span>Бэкап создан: сегодня, 06:00</div>
+
+      <div class="alert show" id="conflictAlert" onclick="toastMsg('Откройте на ПК: Cyberpunk 2077 → Разрешить конфликт')">
+        <span class="big">⚠</span>
+        <div><div class="t">1 конфликт: Cyberpunk 2077</div><div class="d">Разрешается на ПК</div></div>
+      </div>
+
+      <div class="sec-t">Последние сейвы</div>
+      <div id="saveList"></div>
+    </div>
+
+    <!-- ═══ PAIRING ═══ -->
+    <div class="page" id="page-pair">
+      <div class="pin-screen">
+        <h2>Связать устройство</h2>
+        <p>Покажите этот код на ПК<br>или введите код с ПК ниже</p>
+        <div class="pin-digits"><span>4</span><span>8</span><span>1</span><span>5</span></div>
+        <p style="font-size:11.5px;color:var(--text-3);">действует 04:37</p>
+        <div class="kbd" id="kbd"></div>
+        <div class="kbd-hint">🎮 D-pad — выбор · A — ввод · B — назад</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast">✓ Готово</div>
+
+  <div class="pad-hint">LB / RB — вкладки · A — выбрать</div>
+  <footer>
+    <button class="tab active" data-page="home"><span class="i">⇅</span>Синхр.</button>
+    <button class="tab" data-page="pair"><span class="i">🔗</span>Связать</button>
+  </footer>
+</div>
+
+<script>
+const SAVES=[
+ {n:"Elden Ring", ini:"ER", c:"#7a5c2e", m:"00:58 · этот Deck", st:"ok", ic:"✓"},
+ {n:"Baldur's Gate 3", ini:"BG", c:"#4a2e5e", m:"загрузка… 64%", st:"warn", ic:"⟳"},
+ {n:"Hollow Knight", ini:"HK", c:"#2e4a5e", m:"21.11 · этот Deck", st:"ok", ic:"✓"},
+ {n:"Hades", ini:"HD", c:"#5e2e2e", m:"18.11 · только в облаке", st:"cl", ic:"☁"},
+ {n:"Cyberpunk 2077", ini:"CP", c:"#5e552e", m:"конфликт 2 версий", st:"err", ic:"⚠"},
+];
+saveList.innerHTML=SAVES.map(s=>`
+ <div class="save-row focusable" onclick="toastMsg('${s.n}: ${s.m}')">
+   <div class="cov" style="background:linear-gradient(135deg,${s.c},#1b2838);">${s.ini}</div>
+   <div style="flex:1;min-width:0;"><div class="n">${s.n}</div><div class="m">${s.m}</div></div>
+   <span class="st ${s.st}">${s.ic}</span>
+ </div>`).join('');
+
+document.querySelectorAll('footer .tab').forEach(t=>t.onclick=()=>{
+ document.querySelectorAll('footer .tab').forEach(x=>x.classList.remove('active'));
+ document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+ t.classList.add('active');
+ document.getElementById('page-'+t.dataset.page).classList.add('active');
+ focusIdx=0; applyFocus();
+});
+
+function syncNow(){
+ const b=btnSync; if(b.classList.contains('busy'))return;
+ b.classList.add('busy'); syncLbl.textContent='⟳ Синхронизация…';
+ setTimeout(()=>{b.classList.remove('busy');syncLbl.textContent='⇅ Синхронизировать';toastMsg('✓ Все сейвы синхронизированы');},2200);
+}
+function toastMsg(t){toast.textContent=t;toast.style.display='block';clearTimeout(toast._t);toast._t=setTimeout(()=>toast.style.display='none',2400);}
+
+const kbdEl=document.getElementById('kbd');
+[1,2,3,4,5,6,7,8,9,'←',0,'✓'].forEach(k=>{
+ const b=document.createElement('button'); b.textContent=k; b.className='focusable';
+ b.onclick=()=>toastMsg(k==='✓'?'✓ Устройство связано: desktop-ryzen':'Цифра '+k);
+ kbdEl.appendChild(b);
+});
+
+// ── Эмуляция геймпада: стрелки/Tab — фокус, Enter — A ──
+let focusIdx=0;
+function focusables(){return [...document.querySelectorAll('.page.active .focusable')];}
+function applyFocus(){focusables().forEach((el,i)=>el.classList.toggle('focused',i===focusIdx));}
+document.addEventListener('keydown',e=>{
+ const list=focusables(); if(!list.length)return;
+ const cols=document.getElementById('page-pair').classList.contains('active')?3:1;
+ if(e.key==='ArrowDown'||e.key==='Tab'){e.preventDefault();focusIdx=Math.min(list.length-1,focusIdx+(e.key==='Tab'?1:cols));applyFocus();}
+ else if(e.key==='ArrowUp'){e.preventDefault();focusIdx=Math.max(0,focusIdx-cols);applyFocus();}
+ else if(e.key==='ArrowRight'){focusIdx=Math.min(list.length-1,focusIdx+1);applyFocus();}
+ else if(e.key==='ArrowLeft'){focusIdx=Math.max(0,focusIdx-1);applyFocus();}
+ else if(e.key==='Enter'){list[focusIdx].click();}
+});
+applyFocus();
+</script>
+</body>
+</html>

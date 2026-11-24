@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/daemon",
+    "crates/app",
+    "crates/decky-bridge",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+repository = "https://github.com/Langepas94/savesync"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+thiserror = "2"
+blake3 = "1"
+glob = "0.3"

@@ -1,0 +1,15 @@
+[package]
+name = "savesync-core"
+description = "Core sync engine: manifests, game scanner, snapshots, index"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+serde_yaml.workspace = true
+thiserror.workspace = true
+blake3.workspace = true
+glob.workspace = true

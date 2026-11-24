@@ -1,0 +1,20 @@
+/target
+**/*.rs.bk
+
+# Секреты — только локально / GitHub Secrets (см. HANDOFF §2)
+.env
+.env.*
+*.pem
+*.key
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Локальные бэкапы/артефакты при ручных прогонах
+*.ssbak

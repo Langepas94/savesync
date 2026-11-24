@@ -1,0 +1,10 @@
+[package]
+name = "savesync-app"
+description = "SaveSync desktop application (Windows / SteamOS Desktop Mode)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+savesync-core = { path = "../core" }

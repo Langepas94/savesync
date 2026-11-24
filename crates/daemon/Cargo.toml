@@ -1,0 +1,12 @@
+[package]
+name = "savesync-daemon"
+description = "SaveSync daemon: sync engine host, backends, IPC server"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+savesync-core = { path = "../core" }
+serde.workspace = true
+serde_json.workspace = true

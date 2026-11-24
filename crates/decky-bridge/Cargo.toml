@@ -1,0 +1,12 @@
+[package]
+name = "savesync-decky-bridge"
+description = "Bridge helpers for the Decky plugin (Python proxy <-> savesync-daemon IPC)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+savesync-core = { path = "../core" }
+serde.workspace = true
+serde_json.workspace = true
