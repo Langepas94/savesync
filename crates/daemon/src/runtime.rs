@@ -11,6 +11,7 @@ use savesync_core::gdrive::GoogleDrive;
 use savesync_core::ipc::{
     GameStatus, ResponsePayload, ScanPayload, ScannedGame, StatusPayload, SyncPayload, SyncResult,
 };
+use savesync_core::lan::LanBackend;
 use savesync_core::manifest::{Manifest, ManifestDb};
 use savesync_core::paths::{Platform, Roots};
 use savesync_core::scanner::{self, FoundGame};
@@ -89,12 +90,34 @@ impl Runtime {
                 self.state_dir.clone(),
             ));
         }
+        if let Some(lan) = &self.config.backends.lan {
+            // Своё LAN-хранилище — канал для локального движка…
+            out.push(Engine::new(
+                Box::new(FsBackend::new(self.lan_store())) as Box<dyn Backend>,
+                self.config.device_id.clone(),
+                self.state_dir.clone(),
+            ));
+            // …и каждый пир — отдельный канал.
+            for peer in &lan.peers {
+                out.push(Engine::new(
+                    Box::new(LanBackend::new(peer, &lan.pin)) as Box<dyn Backend>,
+                    self.config.device_id.clone(),
+                    self.state_dir.clone(),
+                ));
+            }
+        }
         if out.is_empty() {
             return Err(
-                "канал синхронизации не настроен (backends.fs_path / yandex / google)".into(),
+                "канал синхронизации не настроен (backends.fs_path / yandex / google / lan)".into(),
             );
         }
         Ok(out)
+    }
+
+    /// Локальное хранилище LAN-канала: его обслуживает TCP-сервер
+    /// (см. serve в main), а локальный движок пишет в него напрямую.
+    pub fn lan_store(&self) -> PathBuf {
+        self.state_dir.join("lan-store")
     }
 
     /// Пересканировать систему. Возвращает найденные игры.

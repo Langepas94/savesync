@@ -81,4 +81,12 @@
   `backends.google.token` (refresh-flow — после получения client
   id/secret). Mock-тесты: roundtrip API + engine поверх mock-облака;
   CLI `remote setup google <token>` / `google-off`.
+- `savesync-core::lan` — LAN-канал (M3, plan §3): TCP-протокол с кадрами
+  `[u32 len][payload]`, JSON-заголовки + бинарные blob'ы; сервер
+  обслуживает `<state>/lan-store` для пиров, клиент `LanBackend`
+  реализует `Backend`; pairing PIN (на сервере — blake3-хеш, неверный
+  PIN без побочных эффектов). Шифрование трафика — итерация 2 (Noise/TLS).
+- Демон: `serve` поднимает LAN-сервер при `backends.lan`; каналы LAN
+  (своё хранилище + пиры) участвуют в sync наравне с облаком; CLI
+  `remote setup lan <port> <pin>`, `remote peer add|remove <host:port>`.
 - CI (GitHub Actions): fmt, clippy, test на Windows и Ubuntu.
