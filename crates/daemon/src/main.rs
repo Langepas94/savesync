@@ -239,6 +239,50 @@ fn cmd_remote(args: &[String]) -> i32 {
         (Some("setup"), Some("google-off")) => {
             config.backends.google = None;
         }
+        (Some("setup"), Some("lan")) => {
+            // remote setup lan <port> <pin>
+            let (Some(port), Some(pin)) = (args.get(2), args.get(3)) else {
+                return usage_remote();
+            };
+            let Ok(port) = port.parse::<u16>() else {
+                eprintln!("некорректный порт: {port}");
+                return 2;
+            };
+            let peers = config
+                .backends
+                .lan
+                .take()
+                .map(|l| l.peers)
+                .unwrap_or_default();
+            config.backends.lan = Some(savesync_core::config::LanConfig {
+                port,
+                pin: pin.clone(),
+                peers,
+            });
+        }
+        (Some("setup"), Some("lan-off")) => {
+            config.backends.lan = None;
+        }
+        (Some("peer"), Some("add")) => {
+            let Some(addr) = args.get(2) else {
+                return usage_remote();
+            };
+            let Some(lan) = config.backends.lan.as_mut() else {
+                eprintln!("сначала настройте LAN: remote setup lan <port> <pin>");
+                return 1;
+            };
+            if !lan.peers.contains(addr) {
+                lan.peers.push(addr.clone());
+            }
+        }
+        (Some("peer"), Some("remove")) => {
+            let Some(addr) = args.get(2) else {
+                return usage_remote();
+            };
+            if let Some(lan) = config.backends.lan.as_mut() {
+                lan.peers.retain(|p| p != addr);
+            }
+        }
         (Some("setup"), Some("fs-off")) => {
             config.backends.fs_path = None;
         }
@@ -259,8 +303,12 @@ fn cmd_remote(args: &[String]) -> i32 {
             } else {
                 "—"
             };
+            let lan = match &config.backends.lan {
+                Some(l) => format!("порт {}, пиров: {}", l.port, l.peers.len()),
+                None => "—".into(),
+            };
             println!(
-                "каналы синхронизации:\n  fs:           {fs}\n  yandex-disk:  {ya}\n  google-drive: {gg}"
+                "каналы синхронизации:\n  fs:           {fs}\n  yandex-disk:  {ya}\n  google-drive: {gg}\n  lan:          {lan}"
             );
             return 0;
         }
@@ -282,11 +330,17 @@ fn cmd_remote(args: &[String]) -> i32 {
 fn usage_remote() -> i32 {
     eprintln!(
         "использование:\n  \
-         remote setup fs <путь>     — файловый канал (папка/USB)\n  \
-         remote setup fs-off        — отключить файловый канал\n  \
+         remote setup fs <путь>      — файловый канал (папка/USB)\n  \
+         remote setup fs-off         — отключить файловый канал\n  \
          remote setup yandex <токен> — Яндекс.Диск (OAuth-токен)\n  \
-         remote setup yandex-off    — отключить Яндекс.Диск\n  \
-         remote list                — показать настроенные каналы"
+         remote setup yandex-off     — отключить Яндекс.Диск\n  \
+         remote setup google <токен> — Google Drive (OAuth access token)\n  \
+         remote setup google-off     — отключить Google Drive\n  \
+         remote setup lan <порт> <pin> — LAN-канал (сервер для пиров)\n  \
+         remote setup lan-off        — отключить LAN\n  \
+         remote peer add <host:port> — добавить пира (PIN общий)\n  \
+         remote peer remove <host:port>\n  \
+         remote list                 — показать настроенные каналы"
     );
     2
 }
@@ -305,6 +359,18 @@ fn cmd_serve() -> i32 {
             return 1;
         }
     };
+    // LAN-канал (plan §3): TCP-сервер для пиров поверх lan-store.
+    if let Some(lan) = &runtime.config.backends.lan {
+        let store = runtime.lan_store();
+        let port = lan.port;
+        let hash = savesync_core::lan::pin_hash(&lan.pin);
+        std::thread::spawn(move || {
+            if let Err(e) = savesync_core::lan::serve(store, port, hash) {
+                eprintln!("lan server: {e}");
+            }
+        });
+        println!("LAN-сервер: порт {port}");
+    }
     match ipc::serve(Arc::new(Mutex::new(runtime)), ipc::SOCKET_NAME) {
         Ok(()) => 0,
         Err(e) => {

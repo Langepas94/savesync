@@ -37,7 +37,23 @@ pub struct BackendsConfig {
     /// Google Drive (M2): OAuth access token. Refresh-flow — после
     /// получения client id/secret (plan §6 «OAuth»).
     pub google: Option<GoogleConfig>,
-    // M3: lan: {...}
+    /// LAN-канал (M3): это устройство — сервер для пиров + список пиров,
+    /// с которыми синкаемся напрямую.
+    pub lan: Option<LanConfig>,
+}
+
+/// LAN-канал (plan §3). PIN — общий секрет pairing'а; на сервере
+/// хранится как blake3-хеш.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LanConfig {
+    /// Порт TCP-сервера для пиров.
+    pub port: u16,
+    /// Pairing PIN (в конфиге — открытым текстом; на проверку уходит
+    /// только хеш). Защита от случайных подключений, не от MitM.
+    pub pin: String,
+    /// Адреса пиров (`host:port`), с которыми синкаемся напрямую.
+    #[serde(default)]
+    pub peers: Vec<String>,
 }
 
 /// Канал Яндекс.Диска.
