@@ -26,10 +26,11 @@ pub struct Runtime {
 
 impl Runtime {
     /// Собирает runtime из конфига. Манифесты загружаются из
-    /// `config.manifests_dir` (может быть пустой базой — тогда работают
-    /// только custom-правила, TODO M1).
+    /// `config.manifests_dir` (может быть пустой базой) плюс custom-правила
+    /// пользователя из `<state_dir>/custom/*.yaml` — они никогда не
+    /// перезаписываются обновлением базы.
     pub fn new(config: Config, state_dir: PathBuf) -> io::Result<Self> {
-        let manifests = match &config.manifests_dir {
+        let mut manifests = match &config.manifests_dir {
             Some(dir) => {
                 let (db, errors) = savesync_core::manifest::load_manifest_tree(dir);
                 for e in &errors {
@@ -39,6 +40,16 @@ impl Runtime {
             }
             None => ManifestDb::default(),
         };
+        let custom_dir = state_dir.join("custom");
+        if custom_dir.is_dir() {
+            let (custom_db, errors) = savesync_core::manifest::load_manifest_tree(&custom_dir);
+            for e in &errors {
+                eprintln!("custom manifest load warning: {e}");
+            }
+            for m in custom_db.iter() {
+                manifests.insert(m.clone());
+            }
+        }
         let platform = Platform::current();
         let roots = Roots::detect(platform);
         Ok(Runtime {
@@ -377,5 +388,47 @@ mod tests {
         let world = World::new("unknown");
         let mut pc = world.device("pc");
         assert!(sync_results(pc.sync(Some("no-such-game"))).is_empty());
+    }
+
+    #[test]
+    fn custom_rules_from_state_dir_are_scanned() {
+        let world = World::new("custom");
+        let home = world.dir.join("pc/home");
+        std::fs::create_dir_all(home.join("game/saves")).unwrap();
+        std::fs::write(home.join("game/saves/slot1.sav"), "x").unwrap();
+
+        // Custom-правило лежит в <state>/custom/<slug>.yaml.
+        let state = world.dir.join("pc/state");
+        let custom = state.join("custom");
+        std::fs::create_dir_all(&custom).unwrap();
+        std::fs::write(
+            custom.join("my-game.yaml"),
+            "schema: 1\nname: My Game\nslug: custom:my-game\npaths:\n  - pattern: \"<home>/game/saves\"\n",
+        )
+        .unwrap();
+
+        let config = Config {
+            version: 1,
+            device_id: "pc".into(),
+            device_name: "pc".into(),
+            manifests_dir: None,
+            backends: BackendsConfig::default(),
+        };
+        let mut rt = Runtime::new(config, state).unwrap();
+        // Runtime::new детектит корни реальной машины — в тесте подменяем.
+        rt.platform = Platform::Windows;
+        rt.roots = Roots {
+            home: Some(home),
+            ..Roots::default()
+        };
+
+        match rt.scan() {
+            ResponsePayload::Scan(p) => {
+                assert_eq!(p.found, 1);
+                assert_eq!(p.games[0].game_key, "custom:my-game");
+                assert_eq!(p.games[0].display_name, "My Game");
+            }
+            _ => panic!("expected scan payload"),
+        }
     }
 }
