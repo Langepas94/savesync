@@ -107,7 +107,9 @@ impl<'a> Parser<'a> {
             .position(|&b| b == 0)
             .ok_or(KvError::UnexpectedEof(start))?;
         self.pos += end + 1;
-        String::from_utf8(rest[..end].to_vec()).map_err(|_| KvError::InvalidUtf8(start))
+        // Реальный appinfo содержит не-UTF8 байты (имена в локальных
+        // кодировках) — не падаем, заменяем битые последовательности.
+        Ok(String::from_utf8_lossy(&rest[..end]).into_owned())
     }
 
     fn key(&mut self) -> Result<String, KvError> {

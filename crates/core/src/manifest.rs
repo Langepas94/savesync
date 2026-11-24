@@ -22,7 +22,7 @@
 
 use std::path::Path;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::paths::Platform;
 
@@ -30,7 +30,7 @@ use crate::paths::Platform;
 pub const SCHEMA_VERSION: u32 = 1;
 
 /// Один файл манифеста = одна игра.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
     /// Версия схемы; сейчас принимается только `1`.
     pub schema: u32,
@@ -38,33 +38,39 @@ pub struct Manifest {
     pub name: String,
     /// Каноничный slug = `game_key`; обязан совпадать с именем файла.
     pub slug: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub aliases: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Ids::is_empty")]
     pub ids: Ids,
     #[serde(default)]
     pub paths: Vec<PathRule>,
     /// Пути реестра (Windows / Proton-префикс). Экспорт веток `*.reg` —
     /// отдельная задача (см. research); поле парсится, но не синкается.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub registry: Vec<PathRule>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Portability::is_default")]
     pub portability: Portability,
 }
 
 /// Магазинные идентификаторы (для матчинга со сканером appinfo и подсказок UI).
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Ids {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub steam: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub gog: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub epic: Vec<String>,
 }
 
+impl Ids {
+    pub fn is_empty(&self) -> bool {
+        self.steam.is_empty() && self.gog.is_empty() && self.epic.is_empty()
+    }
+}
+
 /// Один путь сейвов из манифеста.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PathRule {
     /// Паттерн с плейсхолдером (`<winAppData>/...`, `<steamCompat>/...`),
     /// glob-символы `*`, `**`, `?` допустимы.
@@ -77,7 +83,7 @@ pub struct PathRule {
     pub tags: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Os {
     Windows,
@@ -101,15 +107,21 @@ impl Os {
 
 /// Переносимость сейвов между устройствами (свой варн/блок-лист,
 /// см. research: FromSoftware SteamID64, GameMaker secure_save).
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Portability {
     #[serde(default)]
     pub status: PortabilityStatus,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+impl Portability {
+    pub fn is_default(&self) -> bool {
+        self.status == PortabilityStatus::Ok && self.reason.is_none()
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PortabilityStatus {
     /// Переносится без оговорок.

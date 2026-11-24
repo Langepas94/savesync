@@ -45,4 +45,15 @@
   устройство без локальных версий принимает удалённую линию.
 - Документ `docs/manifests-schema.md` — схема репозитория манифестов
   (формат YAML, правила slug'ов, структура репо, валидация).
+- `savesync-core::steam::ufs` — извлечение UFS-конфигов savefiles из
+  appinfo (Steam Cloud): маппинг Win-путей на плейсхолдеры схемы и
+  Proton-двойники `<steamCompat>/<appid>/pfx/...`.
+- `savesync-manifest-gen` — генератор манифестов из `appinfo.vdf`
+  (`--appinfo/--out/--filter/--dry-run`); существующие файлы не
+  перезаписываются, каждая запись проходит `Manifest::validate`.
+- Репозиторий `savesync-manifests` (github.com/Langepas94/savesync-manifests):
+  SCHEMA.md, валидатор `tools/validate.py` + CI, blocklist.yaml, 17 сидовых
+  манифестов, сгенерированных из реального appinfo.
+- `savesync-core::steam::kv_binary`: lossy-декодирование строк (реальный
+  appinfo содержит не-UTF8 байты).
 - CI (GitHub Actions): fmt, clippy, test на Windows и Ubuntu.
