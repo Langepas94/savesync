@@ -6,6 +6,7 @@
 
 pub mod appinfo;
 pub mod kv_binary;
+pub mod ufs;
 pub mod vdf_text;
 
 use std::path::{Path, PathBuf};

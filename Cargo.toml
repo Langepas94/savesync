@@ -5,6 +5,7 @@ members = [
     "crates/daemon",
     "crates/app",
     "crates/decky-bridge",
+    "crates/manifest-gen",
 ]
 
 [workspace.package]

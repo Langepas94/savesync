@@ -291,6 +291,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "savesync-manifest-gen"
+version = "0.1.0"
+dependencies = [
+ "savesync-core",
+ "serde_yaml",
+]
+
+[[package]]
 name = "serde"
 version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"
