@@ -8,3 +8,4 @@ pub mod hash;
 pub mod manifest;
 pub mod paths;
 pub mod scanner;
+pub mod steam;
