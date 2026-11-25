@@ -99,6 +99,13 @@ def run(binary: Path) -> None:
         outcome("pc", "uploaded", "sync", "custom:custom-test")
         command("pc", "manifests", "import", str(manifests), parse=False)
         assert "custom:custom-test" in command("pc", "custom", "list", parse=False)
+        sentinel = root / "pc/appdata/savesync/state/sentinel.yaml"
+        sentinel.write_text("must survive custom remove", encoding="utf-8")
+        for slug in ("../sentinel", "custom:../sentinel", "..\\sentinel", str(sentinel.with_suffix(""))):
+            command("pc", "custom", "remove", slug, expect=2, parse=False)
+            assert sentinel.read_text(encoding="utf-8") == "must survive custom remove"
+        command("pc", "custom", "add", "Disposable Rule", "--path", "<home>/saves/*.sav", parse=False)
+        command("pc", "custom", "remove", "custom:disposable-rule", parse=False)
 
         # A separate namespace avoids touching any real user's running daemon.
         log = root / "daemon.log"

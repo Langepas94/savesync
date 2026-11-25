@@ -166,6 +166,12 @@ impl SaveSyncApp {
         let (tx, rx) = mpsc::channel();
         let client = self.client.clone();
         std::thread::spawn(move || {
+            let refresh_lan_config = matches!(
+                &method,
+                Method::Lan {
+                    action: savesync_core::lan::LanAction::Confirm { .. }
+                }
+            );
             let response = client.request(method).and_then(|payload| {
                 if let ResponsePayload::OAuthStart(start) = &payload {
                     let url = url::Url::parse(&start.authorization_url)
@@ -206,7 +212,22 @@ impl SaveSyncApp {
                     } else {
                         None
                     };
-                    let config = if let ResponsePayload::Config(response) = &payload {
+                    let mut config_error = None;
+                    let config = if refresh_lan_config {
+                        match client.request(Method::GetConfig) {
+                            Ok(ResponsePayload::Config(response)) => Some(response.config),
+                            result => {
+                                config_error = Some(format!(
+                                    "Доверие подтверждено, но настройки LAN не обновлены: {}",
+                                    match result {
+                                        Err(error) => error,
+                                        _ => "неожиданный ответ демона".into(),
+                                    }
+                                ));
+                                None
+                            }
+                        }
+                    } else if let ResponsePayload::Config(response) = &payload {
                         Some(response.config.clone())
                     } else {
                         None
@@ -217,7 +238,7 @@ impl SaveSyncApp {
                         lan,
                         oauth_started,
                         config,
-                        msg: Ok(msg),
+                        msg: config_error.map_or(Ok(msg), Err),
                         refresh_status: rs,
                         refresh_history: rh,
                     }
@@ -269,6 +290,29 @@ impl SaveSyncApp {
             },
             |_| (String::new(), false, false),
         );
+    }
+
+    fn accept_history(&mut self, history: HistoryPayload) {
+        if self.selected.as_deref() == Some(history.game_key.as_str()) {
+            self.history = Some(history);
+        }
+    }
+
+    fn accept_config(&mut self, config: Config, lan_only: bool) {
+        if lan_only {
+            let form = ConfigForm::from_config(&config);
+            self.form.lan_enabled = form.lan_enabled;
+            self.form.lan_port = form.lan_port;
+            self.form.lan_pin = form.lan_pin;
+            self.form.lan_peers = form.lan_peers;
+            if let Some(current) = &mut self.cfg {
+                current.backends.lan = config.backends.lan;
+            }
+        } else {
+            self.form = ConfigForm::from_config(&config);
+            self.cfg = Some(config);
+            self.form_loaded = true;
+        }
     }
 
     fn ensure_config(&mut self) {
@@ -475,15 +519,18 @@ impl eframe::App for SaveSyncApp {
                 self.oauth_pending = Some(provider);
             }
             if let Some(history) = done.history {
-                self.history = Some(history);
+                self.accept_history(history);
+            }
+            let lan_only = done.lan.is_some();
+            if lan_only && done.config.is_none() && done.msg.is_err() {
+                self.cfg = None;
+                self.form_loaded = false;
             }
             if let Some(lan) = done.lan {
                 self.lan = Some(lan);
             }
             if let Some(config) = done.config {
-                self.form = ConfigForm::from_config(&config);
-                self.cfg = Some(config);
-                self.form_loaded = true;
+                self.accept_config(config, lan_only);
             }
             match done.msg {
                 Ok(m) if !m.is_empty() => self.set_notice(m, false),

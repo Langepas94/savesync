@@ -44,6 +44,12 @@ Source: "{#SourceDir}\savesync-daemon.exe"; DestDir: "{app}"; Flags: ignoreversi
 Source: "{#SourceDir}\savesync-app.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\docs\OAUTH.md"; DestDir: "{app}\docs"; Flags: ignoreversion
 Source: "..\..\docs\LAN.md"; DestDir: "{app}\docs"; Flags: ignoreversion
+Source: "..\..\docs\QUICKSTART.md"; DestDir: "{app}\docs"; Flags: ignoreversion
+Source: "..\..\docs\INSTALL-AND-TEST.md"; DestDir: "{app}\docs"; Flags: ignoreversion
+Source: "..\..\docs\USER-GUIDE.md"; DestDir: "{app}\docs"; Flags: ignoreversion
+Source: "..\..\docs\TRY-1.0.0.md"; DestDir: "{app}\docs"; Flags: ignoreversion
+Source: "..\..\docs\STEAMOS-DELIVERY.md"; DestDir: "{app}\docs"; Flags: ignoreversion
+Source: "..\..\docs\manifests-schema.md"; DestDir: "{app}\docs"; Flags: ignoreversion
 Source: "..\..\crates\core\manifests\LICENSE"; DestDir: "{app}\licenses"; DestName: "manifests.txt"; Flags: ignoreversion
 [Icons]
 Name: "{group}\SaveSync"; Filename: "{app}\savesync-app.exe"

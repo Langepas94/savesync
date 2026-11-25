@@ -61,11 +61,14 @@ impl SaveSyncApp {
                                         sync_one = Some(g.game_key.clone());
                                     }
                                     if ui
-                                        .button(if is_sel {
-                                            "Скрыть"
-                                        } else {
-                                            "Детали"
-                                        })
+                                        .add_enabled(
+                                            !self.busy(),
+                                            egui::Button::new(if is_sel {
+                                                "Скрыть"
+                                            } else {
+                                                "Детали"
+                                            }),
+                                        )
                                         .clicked()
                                     {
                                         select_one = Some(if is_sel {
@@ -121,6 +124,9 @@ impl SaveSyncApp {
             ui.label(RichText::new("нет истории").color(DIM));
             return;
         };
+        if h.game_key != key {
+            return;
+        }
 
         // Конфликт-резолвер: больше одной головы.
         if h.heads.len() > 1 {
@@ -146,7 +152,7 @@ impl SaveSyncApp {
                         ui.horizontal(|ui| {
                             let is_applied = h.applied.as_deref() == Some(v.id.as_str());
                             let is_head = h.heads.contains(&v.id);
-                            ui.label(fmt_ts(v.created_at));
+                            ui.label(format!("{} UTC", fmt_ts(v.created_at)));
                             ui.label(RichText::new(&v.device).color(DIM));
                             ui.label(
                                 RichText::new(&v.id[..v.id.len().min(12)])
@@ -164,10 +170,7 @@ impl SaveSyncApp {
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
                                     if ui
-                                        .add_enabled(
-                                            !self.busy() && !is_applied,
-                                            egui::Button::new("Применить"),
-                                        )
+                                        .add_enabled(!self.busy(), egui::Button::new("Применить"))
                                         .clicked()
                                     {
                                         restore_id = Some(v.id.clone());

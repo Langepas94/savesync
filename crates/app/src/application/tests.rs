@@ -210,3 +210,147 @@ fn oauth_poll_never_waits_for_daemon_on_ui_thread() {
     app.apply_oauth_poll(provider, result);
     assert_eq!(app.oauth_pending, Some(Provider::Google));
 }
+
+#[test]
+fn late_history_cannot_replace_selected_game_history() {
+    let mut app = SaveSyncApp::new();
+    app.selected = Some("second".into());
+    let history = |key: &str| HistoryPayload {
+        game_key: key.into(),
+        versions: vec![],
+        applied: None,
+        heads: vec![],
+    };
+    app.accept_history(history("second"));
+    app.accept_history(history("first"));
+    assert_eq!(app.history.as_ref().unwrap().game_key, "second");
+    app.selected = None;
+    app.history = None;
+    app.accept_history(history("second"));
+    assert!(app.history.is_none());
+}
+
+#[test]
+fn lan_confirmation_refreshes_peer_without_discarding_other_edits() {
+    use savesync_core::ipc::ConfigPayload;
+    let config = Config {
+        version: 1,
+        device_id: "test".into(),
+        device_name: "Test".into(),
+        manifests_dir: None,
+        backends: Default::default(),
+        backups: Default::default(),
+    };
+    let mut updated = config.clone();
+    updated.backends.lan = Some(LanConfig {
+        port: 47660,
+        pin: String::new(),
+        peers: vec!["192.168.1.10:47660".into()],
+    });
+    struct Fake(Config);
+    impl DaemonClient for Fake {
+        fn request(&self, method: Method) -> Result<ResponsePayload, String> {
+            match method {
+                Method::Lan { .. } => Ok(ResponsePayload::Lan(Default::default())),
+                Method::GetConfig => Ok(ResponsePayload::Config(ConfigPayload {
+                    config: self.0.clone(),
+                })),
+                _ => panic!("unexpected request"),
+            }
+        }
+    }
+    let mut app = SaveSyncApp::new();
+    app.accept_config(config, false);
+    app.form.fs_path = "D:/unsaved-edit".into();
+    app.client = Arc::new(Fake(updated.clone()));
+    app.lan_action(savesync_core::lan::LanAction::Confirm {
+        peer_id: "peer".into(),
+    });
+    let done = app
+        .job
+        .take()
+        .unwrap()
+        .rx
+        .recv_timeout(Duration::from_secs(2))
+        .unwrap();
+    assert!(done.msg.is_ok());
+    app.accept_config(done.config.unwrap(), true);
+    assert_eq!(app.form.lan_peers, "192.168.1.10:47660");
+    assert_eq!(app.form.fs_path, "D:/unsaved-edit");
+    let mut saved = app.cfg.clone().unwrap();
+    app.form.apply_to(&mut saved).unwrap();
+    assert_eq!(saved.backends.lan, updated.backends.lan);
+}
+
+#[test]
+fn applied_conflict_branch_can_be_selected_in_game_view() {
+    use savesync_core::ipc::VersionEntry;
+    struct Fake(mpsc::Sender<Method>);
+    impl DaemonClient for Fake {
+        fn request(&self, method: Method) -> Result<ResponsePayload, String> {
+            self.0.send(method).unwrap();
+            Err("test: no real daemon".into())
+        }
+    }
+    let (sent, received) = mpsc::channel();
+    let mut app = SaveSyncApp::new();
+    app.client = Arc::new(Fake(sent));
+    app.selected = Some("test-game".into());
+    app.history = Some(HistoryPayload {
+        game_key: "test-game".into(),
+        applied: Some("local-version".into()),
+        heads: vec!["local-version".into(), "remote-version".into()],
+        versions: vec![VersionEntry {
+            id: "local-version".into(),
+            parent: None,
+            created_at: 0,
+            device: "PC".into(),
+            hash: "hash".into(),
+        }],
+    });
+    let context = egui::Context::default();
+    let input = || egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(1000.0, 700.0),
+        )),
+        ..Default::default()
+    };
+    let output = context.run(input(), |context| {
+        egui::CentralPanel::default().show(context, |ui| app.view_detail(ui));
+    });
+    let position = output
+        .shapes
+        .iter()
+        .find_map(|shape| {
+            if let egui::Shape::Text(text) = &shape.shape {
+                if text.galley.text() == "Применить" {
+                    return Some(text.pos + text.galley.size() * 0.5);
+                }
+            }
+            None
+        })
+        .expect("restore button must be visible");
+    for pressed in [true, false] {
+        let mut click = input();
+        click.events = vec![
+            egui::Event::PointerMoved(position),
+            egui::Event::PointerButton {
+                pos: position,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            },
+        ];
+        let _ = context.run(click, |context| {
+            egui::CentralPanel::default().show(context, |ui| app.view_detail(ui));
+        });
+    }
+    assert_eq!(
+        received.recv_timeout(Duration::from_secs(2)).unwrap(),
+        Method::Restore {
+            game_key: "test-game".into(),
+            version_id: "local-version".into(),
+        }
+    );
+}
