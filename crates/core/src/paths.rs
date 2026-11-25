@@ -62,12 +62,15 @@ impl Roots {
                 let local = std::env::var_os("LOCALAPPDATA").map(PathBuf::from);
                 let saved_games = home.as_ref().map(|h| h.join("Saved Games"));
                 let documents = home.as_ref().map(|h| h.join("Documents"));
+                let steam_libraries =
+                    crate::steam::discovery::detect_roots(platform, home.as_deref());
                 Roots {
                     home,
                     win_appdata: appdata,
                     win_local_appdata: local,
                     win_saved_games: saved_games,
                     documents,
+                    steam_libraries,
                     ..Roots::default()
                 }
             }
@@ -79,10 +82,7 @@ impl Roots {
                     .map(PathBuf::from)
                     .or_else(|| home.as_ref().map(|h| h.join(".config")));
                 let documents = home.as_ref().map(|h| h.join("Documents"));
-                let steam = home
-                    .as_ref()
-                    .map(|h| vec![h.join(".local/share/Steam"), h.join(".steam/steam")])
-                    .unwrap_or_default();
+                let steam = crate::steam::discovery::detect_roots(platform, home.as_deref());
                 Roots {
                     home,
                     xdg_data,
@@ -135,6 +135,75 @@ pub fn resolve_pattern_multi(pattern: &str, roots: &Roots) -> Vec<String> {
 /// Одиночный резолв для паттернов без мульти-корней (тесты, простые вызовы).
 pub fn resolve_pattern(pattern: &str, roots: &Roots) -> Option<String> {
     resolve_pattern_multi(pattern, roots).into_iter().next()
+}
+
+/// Canonicalize trusted path roots without exposing Windows verbatim prefixes
+/// to glob's '?' parser. Missing suffixes are preserved for first-save restore.
+pub fn canonical_path(path: &std::path::Path) -> PathBuf {
+    let mut ancestor = path;
+    let mut suffix = Vec::new();
+    let canonical = loop {
+        if let Ok(found) = ancestor.canonicalize() {
+            break found;
+        }
+        let Some(name) = ancestor.file_name() else {
+            return path.to_path_buf();
+        };
+        suffix.push(name.to_os_string());
+        let Some(parent) = ancestor.parent() else {
+            return path.to_path_buf();
+        };
+        ancestor = parent;
+    };
+    let text = canonical.to_string_lossy();
+    let mut canonical = if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{rest}"))
+    } else if let Some(rest) = text.strip_prefix(r"\\?\") {
+        PathBuf::from(rest)
+    } else {
+        canonical
+    };
+    for component in suffix.into_iter().rev() {
+        canonical.push(component);
+    }
+    canonical
+}
+
+pub fn canonical_pattern(resolved: &str) -> String {
+    let base = crate::snapshot::location_base(resolved);
+    let base_text = base.to_string_lossy();
+    let rest = resolved
+        .strip_prefix(base_text.as_ref())
+        .unwrap_or(resolved);
+    let mut canonical = canonical_path(&base).to_string_lossy().replace('\\', "/");
+    if !canonical.ends_with('/') && !rest.is_empty() {
+        canonical.push('/');
+    }
+    canonical.push_str(rest);
+    canonical
+}
+
+/// Trusted pattern roots may resolve through Steam's aliases; descendants may
+/// not escape that root through a symlink while collecting actual save data.
+pub fn validate_source_path(base: &std::path::Path, path: &std::path::Path) -> std::io::Result<()> {
+    if !path.starts_with(base) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "save path is outside its location",
+        ));
+    }
+    for ancestor in path.ancestors().take_while(|ancestor| *ancestor != base) {
+        if std::fs::symlink_metadata(ancestor)?
+            .file_type()
+            .is_symlink()
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "symlink inside save location",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn join(root: &std::path::Path, rest: &str) -> String {

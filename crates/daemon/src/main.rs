@@ -22,7 +22,7 @@ use savesync_core::paths::Platform;
 use runtime::Runtime;
 
 mod commands;
-use commands::{cmd_backup, cmd_custom, cmd_remote, cmd_serve};
+use commands::{cmd_backup, cmd_custom, cmd_manifests, cmd_remote, cmd_serve};
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -35,6 +35,7 @@ fn main() {
             cmd_via_daemon_or_direct(Method::Sync { game_key: game })
         }
         Some("custom") => cmd_custom(&args[1..]),
+        Some("manifests") => cmd_manifests(&args[1..]),
         Some("history") if args.len() == 2 => cmd_via_daemon_or_direct(Method::History {
             game_key: args[1].clone(),
         }),
@@ -106,6 +107,7 @@ fn cmd_via_daemon_or_direct(method: Method) -> i32 {
     };
     let payload = match &method {
         Method::Scan => rt.scan(),
+        Method::ReloadManifests => rt.reload_manifests(),
         Method::Sync { game_key } => rt.sync(game_key.as_deref()),
         Method::Status => rt.status(),
         Method::History { game_key } => rt.history(game_key),

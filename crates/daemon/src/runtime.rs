@@ -35,16 +35,26 @@ impl Runtime {
     /// пользователя из `<state_dir>/custom/*.yaml` — они никогда не
     /// перезаписываются обновлением базы.
     pub fn new(config: Config, state_dir: PathBuf) -> io::Result<Self> {
-        let mut manifests = match &config.manifests_dir {
-            Some(dir) => {
-                let (db, errors) = savesync_core::manifest::load_manifest_tree(dir);
-                for e in &errors {
-                    eprintln!("manifest load warning: {e}");
-                }
-                db
+        let mut manifests = savesync_core::bundled_manifests::load();
+        let installed_database = state_dir
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."))
+            .join("manifests");
+        for dir in [
+            Some(&installed_database).filter(|dir| dir.is_dir()),
+            config.manifests_dir.as_ref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            let (db, errors) = savesync_core::manifest::load_manifest_tree(dir);
+            for e in &errors {
+                eprintln!("manifest load warning: {e}");
             }
-            None => ManifestDb::default(),
-        };
+            for manifest in db.iter() {
+                manifests.insert(manifest.clone());
+            }
+        }
         let custom_dir = state_dir.join("custom");
         if custom_dir.is_dir() {
             let (custom_db, errors) = savesync_core::manifest::load_manifest_tree(&custom_dir);
@@ -57,17 +67,18 @@ impl Runtime {
         }
         let platform = Platform::current();
         let roots = Roots::detect(platform);
-        let last_scan = scanner::scan(&manifests, platform, &roots);
-        Ok(Runtime {
+        let mut runtime = Runtime {
             config,
             manifests,
             platform,
             roots,
             state_dir,
-            last_scan,
+            last_scan: Vec::new(),
             lan_server: None,
             serving: false,
-        })
+        };
+        runtime.refresh_catalog();
+        Ok(runtime)
     }
 }
 mod backups;

@@ -15,6 +15,8 @@ pub enum Method {
     Status,
     /// Пересканировать систему, вернуть найденные игры.
     Scan,
+    /// Reload installed/curated/custom manifests and rescan without restart.
+    ReloadManifests,
     /// Ручная синхронизация (MVP-триггер). `None` — все игры.
     Sync { game_key: Option<String> },
     /// История версий игры (из локального индекса).

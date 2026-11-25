@@ -3,7 +3,7 @@ impl Runtime {
     /// Ручная синхронизация: push локальных изменений, затем pull
     /// удалённых. Конфликт сообщается наружу, не разрешается молча.
     pub fn sync(&mut self, game_key: Option<&str>) -> ResponsePayload {
-        self.last_scan = scanner::scan(&self.manifests, self.platform, &self.roots);
+        self.refresh_catalog();
 
         let targets: Vec<&FoundGame> = match game_key {
             Some(key) => self
@@ -77,6 +77,61 @@ fn sync_one(
             }
         }
     };
+
+    if manifest.portability.status == savesync_core::manifest::PortabilityStatus::Blocked {
+        return with_channel(
+            channel,
+            SyncResult {
+                game_key: game.game_key.clone(),
+                outcome: "skipped".into(),
+                detail: Some(
+                    manifest
+                        .portability
+                        .reason
+                        .clone()
+                        .unwrap_or_else(|| "синхронизация сейвов заблокирована".into()),
+                ),
+            },
+        );
+    }
+
+    if game.locations.is_empty() {
+        return with_channel(
+            channel,
+            match engine.pull(manifest, roots, platform) {
+                Ok(PullOutcome::Applied { version, .. }) => SyncResult {
+                    game_key: game.game_key.clone(),
+                    outcome: "applied".into(),
+                    detail: Some(version),
+                },
+                Ok(PullOutcome::NoRemoteVersion) => SyncResult {
+                    game_key: game.game_key.clone(),
+                    outcome: "no_saves".into(),
+                    detail: Some("сейвы ещё не созданы".into()),
+                },
+                Ok(PullOutcome::UpToDate) => SyncResult {
+                    game_key: game.game_key.clone(),
+                    outcome: "up_to_date".into(),
+                    detail: None,
+                },
+                Ok(PullOutcome::Conflict(heads)) => SyncResult {
+                    game_key: game.game_key.clone(),
+                    outcome: "conflict".into(),
+                    detail: Some(heads.join(", ")),
+                },
+                Ok(PullOutcome::Locked(holder)) => SyncResult {
+                    game_key: game.game_key.clone(),
+                    outcome: "locked".into(),
+                    detail: Some(holder),
+                },
+                Err(error) => SyncResult {
+                    game_key: game.game_key.clone(),
+                    outcome: "error".into(),
+                    detail: Some(error.to_string()),
+                },
+            },
+        );
+    }
 
     // Устройство, никогда не синхронизировавшее игру, принимает удалённую
     // линию версий целиком: push своего состояния как нового корня был бы

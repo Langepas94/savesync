@@ -198,6 +198,11 @@ impl Manifest {
         {
             errors.push("empty pattern".into());
         }
+        for rule in &self.paths {
+            if let Err(error) = glob::Pattern::new(&rule.pattern) {
+                errors.push(format!("invalid path pattern: {error}"));
+            }
+        }
         if self.portability.status != PortabilityStatus::Ok && self.portability.reason.is_none() {
             errors.push("portability.warn/blocked requires reason".into());
         }
@@ -263,12 +268,23 @@ fn load_dir_recursive(dir: &Path, db: &mut ManifestDb, errors: &mut Vec<std::io:
     };
     for entry in read_dir.flatten() {
         let path = entry.path();
+        if entry.file_type().is_ok_and(|kind| kind.is_symlink()) {
+            errors.push(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "symlinks are not allowed in manifest databases",
+            ));
+            continue;
+        }
         if path.is_dir() {
             load_dir_recursive(&path, db, errors);
         } else if path.extension().and_then(|e| e.to_str()) == Some("yaml") {
             match std::fs::read_to_string(&path) {
                 Ok(text) => match parse_manifest_str(&text) {
-                    Ok(m) => db.entries.push(m),
+                    Ok(m) if m.validate().is_empty() => db.entries.push(m),
+                    Ok(m) => errors.push(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        m.validate().join("; "),
+                    )),
                     Err(e) => errors.push(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
                 },
                 Err(e) => errors.push(e),

@@ -32,7 +32,7 @@ pub(crate) fn validate_result(
             .filter(|result| {
                 !matches!(
                     result.outcome.as_str(),
-                    "uploaded" | "applied" | "up_to_date"
+                    "uploaded" | "applied" | "up_to_date" | "no_saves"
                 )
             })
             .map(|result| {
@@ -50,7 +50,7 @@ pub(crate) fn validate_result(
     }
     let valid = match (method, &payload) {
         (Method::Status, ResponsePayload::Status(_))
-        | (Method::Scan, ResponsePayload::Scan(_))
+        | (Method::Scan | Method::ReloadManifests, ResponsePayload::Scan(_))
         | (Method::History { .. }, ResponsePayload::History(_))
         | (Method::Backup { .. }, ResponsePayload::Backup(_))
         | (Method::GetConfig | Method::SaveConfig { .. }, ResponsePayload::Config(_)) => true,

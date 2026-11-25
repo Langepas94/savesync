@@ -12,7 +12,7 @@ impl Runtime {
                 }],
             });
         };
-        self.last_scan = scanner::scan(&self.manifests, self.platform, &self.roots);
+        self.refresh_catalog();
         let Some(game) = self.last_scan.iter().find(|g| g.game_key == game_key) else {
             return ResponsePayload::Sync(SyncPayload {
                 results: vec![SyncResult {
@@ -22,6 +22,15 @@ impl Runtime {
                 }],
             });
         };
+        if game.locations.is_empty() {
+            return ResponsePayload::Sync(SyncPayload {
+                results: vec![SyncResult {
+                    game_key: game_key.into(),
+                    outcome: "error".into(),
+                    detail: Some("сейвы ещё не созданы".into()),
+                }],
+            });
+        }
         match savesync_core::backup::create_backup(
             &game.game_key,
             &self.config.device_id,

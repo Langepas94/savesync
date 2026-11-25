@@ -15,6 +15,36 @@ use super::appinfo::AppInfoEntry;
 use super::kv_binary::Value;
 use crate::manifest::{Os, PathRule};
 
+/// Shared generator for runtime discovery and the standalone manifest tool.
+pub fn manifest_from_entry(entry: &AppInfoEntry) -> Option<crate::manifest::Manifest> {
+    use crate::manifest::{Ids, Manifest};
+    if !entry.app_type()?.eq_ignore_ascii_case("game") {
+        return None;
+    }
+    let name = entry.display_name()?;
+    let mut paths: Vec<_> = entry
+        .ufs_savefiles()
+        .iter()
+        .flat_map(|save| to_path_rules(entry.appid, save))
+        .collect();
+    paths.sort_by(|a, b| a.pattern.cmp(&b.pattern));
+    paths.dedup_by(|a, b| a.pattern == b.pattern && a.os == b.os);
+    let manifest = Manifest {
+        schema: 1,
+        name: name.into(),
+        slug: crate::game_key::slugify(name),
+        aliases: vec![name.into()],
+        ids: Ids {
+            steam: vec![entry.appid.to_string()],
+            ..Ids::default()
+        },
+        paths,
+        registry: vec![],
+        portability: Default::default(),
+    };
+    manifest.validate().is_empty().then_some(manifest)
+}
+
 /// Одна запись `ufs/savefiles/N`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UfsSaveFile {

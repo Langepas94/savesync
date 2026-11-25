@@ -66,6 +66,7 @@ pub fn location_base(resolved: &str) -> PathBuf {
 
 /// Рекурсивно собирает файлы локации (hits могут быть файлами и папками).
 fn collect_files(base: &Path, hit: &Path, out: &mut Vec<(PathBuf, PathBuf)>) -> io::Result<()> {
+    crate::paths::validate_source_path(base, hit)?;
     if std::fs::symlink_metadata(hit)?.file_type().is_symlink() {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -77,10 +78,12 @@ fn collect_files(base: &Path, hit: &Path, out: &mut Vec<(PathBuf, PathBuf)>) -> 
             collect_files(base, &entry?.path(), out)?;
         }
     } else if hit.is_file() {
-        let rel = hit
-            .strip_prefix(base)
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| hit.to_path_buf());
+        let rel = hit.strip_prefix(base).map(PathBuf::from).map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "save file is outside its location",
+            )
+        })?;
         out.push((rel, hit.to_path_buf()));
     }
     Ok(())

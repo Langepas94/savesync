@@ -5,6 +5,7 @@
 //! Полностью наш источник данных — чужих API в рантайме нет (HANDOFF §1).
 
 pub mod appinfo;
+pub mod discovery;
 pub mod kv_binary;
 pub mod ufs;
 pub mod vdf_text;
@@ -167,7 +168,10 @@ pub fn match_manifests(db: &ManifestDb, apps: &[SteamApp]) -> Vec<SteamMatch> {
             None => {
                 let slug = game_key::slugify(&app.name);
                 match db.get(&slug) {
-                    Some(m) => (m, MatchKind::NameSlug),
+                    Some(m) if m.ids.steam.is_empty() || m.ids.steam.contains(&appid) => {
+                        (m, MatchKind::NameSlug)
+                    }
+                    Some(_) => continue,
                     None => continue,
                 }
             }
@@ -286,5 +290,17 @@ paths:
         assert_eq!(matches[0].matched_by, MatchKind::SteamId);
         assert_eq!(matches[1].game_key, "hades");
         assert_eq!(matches[1].matched_by, MatchKind::NameSlug);
+    }
+    #[test]
+    fn name_fallback_cannot_override_a_different_steam_id() {
+        let manifest = parse_manifest_str(MANIFEST).unwrap();
+        let apps = vec![SteamApp {
+            appid: 999,
+            name: "ELDEN RING".into(),
+            installdir: "Game".into(),
+            library: PathBuf::from("/steam"),
+            compat_prefix: None,
+        }];
+        assert!(match_manifests(&ManifestDb::from_entries(vec![manifest]), &apps).is_empty());
     }
 }
