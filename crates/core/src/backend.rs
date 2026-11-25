@@ -21,12 +21,19 @@ pub trait Backend {
     fn list_snapshots(&self, game_key: &str) -> io::Result<Vec<String>>;
     fn get_index(&self) -> io::Result<Option<Vec<u8>>>;
     fn put_index(&self, data: &[u8]) -> io::Result<()>;
+    /// Publish version history without dropping concurrent publications.
+    fn publish_index(&self, data: &[u8], _writer: &str) -> io::Result<()> {
+        self.put_index(data)
+    }
     fn name(&self) -> &'static str;
 }
 
 /// Каналы независимы (plan §3): движок может работать поверх набора
 /// бэкендов, поэтому trait object тоже реализует Backend.
 impl Backend for Box<dyn Backend> {
+    fn publish_index(&self, data: &[u8], writer: &str) -> io::Result<()> {
+        (**self).publish_index(data, writer)
+    }
     fn put_snapshot(&self, game_key: &str, version_id: &str, data: &[u8]) -> io::Result<()> {
         (**self).put_snapshot(game_key, version_id, data)
     }
@@ -68,11 +75,78 @@ impl FsBackend {
     }
 }
 
+impl FsBackend {
+    fn publish(&self, data: &[u8], writer: Option<&str>) -> io::Result<()> {
+        std::fs::create_dir_all(&self.root)?;
+        let lock = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(self.root.join("index.lock"))?;
+        fs2::FileExt::lock_exclusive(&lock)?;
+        let incoming = crate::index_journal::parse(data)?;
+        let old = self.get_index()?;
+        let mut merged = old
+            .as_deref()
+            .map(crate::index_journal::parse)
+            .transpose()?
+            .unwrap_or_else(crate::index::Index::new);
+        let previous_locks = merged.locks.clone();
+        crate::index_journal::merge(&mut merged, &incoming)?;
+        for (game, entry) in &incoming.games {
+            merged.game_mut(game).policy = entry.policy;
+        }
+        if let Some(writer) = writer {
+            merged.locks = previous_locks;
+            merged.locks.retain(|_, lock| lock.device != writer);
+            for (game, lock) in &incoming.locks {
+                if lock.device == writer {
+                    merged.locks.insert(game.clone(), lock.clone());
+                }
+            }
+        } else {
+            merged.locks = incoming.locks;
+        }
+        let bytes = if old.is_none() {
+            data.to_vec()
+        } else {
+            serde_json::to_vec(&merged).map_err(io::Error::other)?
+        };
+        let path = self.root.join("index.json");
+        let temporary = self.root.join("index.json.tmp");
+        use std::io::Write;
+        let mut file = std::fs::File::create(&temporary)?;
+        file.write_all(&bytes)?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(temporary, path)
+    }
+}
+
 impl Backend for FsBackend {
     fn put_snapshot(&self, game_key: &str, version_id: &str, data: &[u8]) -> io::Result<()> {
         let path = self.snapshot_path(game_key, version_id)?;
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
+        }
+        let guard = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(path.with_extension("zip.lock"))?;
+        fs2::FileExt::lock_exclusive(&guard)?;
+        match std::fs::read(&path) {
+            Ok(existing) if existing == data => return Ok(()),
+            Ok(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::AlreadyExists,
+                    "immutable snapshot already exists with different content",
+                ))
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => (),
+            Err(error) => return Err(error),
         }
         let tmp = path.with_extension("zip.tmp");
         std::fs::write(&tmp, data)?;
@@ -113,11 +187,10 @@ impl Backend for FsBackend {
     }
 
     fn put_index(&self, data: &[u8]) -> io::Result<()> {
-        std::fs::create_dir_all(&self.root)?;
-        let path = self.root.join("index.json");
-        let tmp = self.root.join("index.json.tmp");
-        std::fs::write(&tmp, data)?;
-        std::fs::rename(&tmp, &path)
+        self.publish(data, None)
+    }
+    fn publish_index(&self, data: &[u8], writer: &str) -> io::Result<()> {
+        self.publish(data, Some(writer))
     }
 
     fn name(&self) -> &'static str {

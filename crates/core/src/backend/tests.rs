@@ -64,3 +64,52 @@ fn rejects_path_escape_before_touching_files() {
     );
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn stale_writers_merge_under_filesystem_lock() {
+    let directory = tempfile::tempdir().unwrap();
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+    let mut tasks = Vec::new();
+    for number in 0..8 {
+        let root = directory.path().to_path_buf();
+        let barrier = barrier.clone();
+        tasks.push(std::thread::spawn(move || {
+            let backend = FsBackend::new(root);
+            let writer = format!("writer{number}");
+            let index = crate::index_journal::tests::branch(&writer, None);
+            barrier.wait();
+            backend
+                .publish_index(&serde_json::to_vec(&index).unwrap(), &writer)
+                .unwrap();
+        }));
+    }
+    for task in tasks {
+        task.join().unwrap();
+    }
+    let backend = FsBackend::new(directory.path());
+    let index = crate::index_journal::parse(&backend.get_index().unwrap().unwrap()).unwrap();
+    assert_eq!(index.game("game").unwrap().versions.len(), 8);
+}
+
+#[test]
+fn stale_foreign_lock_does_not_reappear_after_release() {
+    let directory = tempfile::tempdir().unwrap();
+    let backend = FsBackend::new(directory.path());
+    let mut owner = crate::index::Index::new();
+    owner.acquire_lock("game", "pc", 1);
+    backend
+        .publish_index(&serde_json::to_vec(&owner).unwrap(), "pc")
+        .unwrap();
+    let stale = backend.get_index().unwrap().unwrap();
+    owner.release_lock("game", "pc");
+    backend
+        .publish_index(&serde_json::to_vec(&owner).unwrap(), "pc")
+        .unwrap();
+    backend.publish_index(&stale, "deck").unwrap();
+    assert!(
+        crate::index_journal::parse(&backend.get_index().unwrap().unwrap())
+            .unwrap()
+            .locks
+            .is_empty()
+    );
+}

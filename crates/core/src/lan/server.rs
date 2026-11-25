@@ -156,6 +156,7 @@ async fn handle(
         Operation::Ping => Ok(None),
         Operation::GetIndex => backend.get_index(),
         Operation::PutIndex => backend.put_index(&blob).map(|_| None),
+        Operation::PublishIndex { writer } => backend.publish_index(&blob, &writer).map(|_| None),
         Operation::GetSnapshot { game, version } => backend.get_snapshot(&game, &version).map(Some),
         Operation::PutSnapshot { game, version } => {
             backend.put_snapshot(&game, &version, &blob).map(|_| None)
