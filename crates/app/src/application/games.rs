@@ -8,6 +8,7 @@ pub(super) struct AddGameForm {
     name: String,
     paths: String,
     error: Option<String>,
+    picker: Option<std::sync::mpsc::Receiver<Option<std::path::PathBuf>>>,
 }
 
 impl AddGameForm {
@@ -182,10 +183,43 @@ impl SaveSyncApp {
         };
         let mut submitted = false;
         let mut cancelled = false;
+        if let Some(picker) = &form.picker {
+            match picker.try_recv() {
+                Ok(path) => {
+                    if let Some(path) = path {
+                        if !form.paths.trim().is_empty() {
+                            form.paths.push('\n');
+                        }
+                        form.paths.push_str(&path.to_string_lossy());
+                    }
+                    form.picker = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    form.error = Some("Не удалось открыть выбор папки".into());
+                    form.picker = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
+        }
         egui::Frame::group(ui.style()).show(ui, |ui| {
             ui.label("Название игры");
             ui.add(egui::TextEdit::singleline(&mut form.name).desired_width(420.0));
             ui.label("Файлы или папки сохранений");
+            if ui
+                .add_enabled(form.picker.is_none(), egui::Button::new("Выбрать папку…"))
+                .clicked()
+            {
+                let (sender, receiver) = std::sync::mpsc::channel();
+                let context = ui.ctx().clone();
+                std::thread::spawn(move || {
+                    let path = rfd::FileDialog::new()
+                        .set_title("Выберите папку сохранений")
+                        .pick_folder();
+                    let _ = sender.send(path);
+                    context.request_repaint();
+                });
+                form.picker = Some(receiver);
+            }
             ui.add(
                 egui::TextEdit::multiline(&mut form.paths)
                     .desired_width(420.0)
