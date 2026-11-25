@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+- Add per-user Windows installer, HKCU autostart, single-instance desktop/tray,
+  background release checks and verified signed installer updates.
+- Stop the daemon after active work before upgrade/uninstall; disconnected stop
+  callers cannot leave a permanently stopping daemon.
+- Wire Authenticode signing through GitHub Secrets, signed uninstaller/self-copies,
+  publisher certificate pinning and a fail-closed release draft workflow.
+
+
 - Preserve concurrent cloud version history with immutable delta publications,
   no-op suppression and a hash-verified persistent cache; read all listing pages.
 - Merge filesystem/LAN publications under a file lock without reviving stale

@@ -1,6 +1,13 @@
 use super::*;
 use savesync_core::lan::LanServer;
 impl Runtime {
+    pub fn prepare_shutdown(&mut self) -> ResponsePayload {
+        self.shutdown_requested = true;
+        self.oauth_jobs.clear();
+        self.lan_server = None;
+        self.serving = false;
+        ResponsePayload::Stopped
+    }
     pub fn get_config(&self) -> ResponsePayload {
         ResponsePayload::Config(savesync_core::ipc::ConfigPayload {
             config: self.config.clone(),

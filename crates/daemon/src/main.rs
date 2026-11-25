@@ -28,6 +28,13 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let code = match args.first().map(String::as_str) {
         Some("serve") => cmd_serve(),
+        Some("stop") => {
+            if !ipc::probe(&savesync_core::ipc::client::socket_name()) {
+                0
+            } else {
+                cmd_via_daemon(Method::Shutdown)
+            }
+        }
         Some("scan") => cmd_via_daemon_or_direct(Method::Scan),
         Some("status") => cmd_via_daemon(Method::Status),
         Some("sync") => {
@@ -47,7 +54,7 @@ fn main() {
         Some("backup") => cmd_backup(&args[1..]),
         _ => {
             eprintln!(
-                "savesync-daemon {}\nкоманды: serve | status | scan | sync [game_key] | history <game_key> | restore <game_key> <version_id> | custom <add|list|remove> | remote <login|logout|setup|peer|list> | backup <create|list|import|dir>",
+                "savesync-daemon {}\nкоманды: serve | stop | status | scan | sync [game_key] | history <game_key> | restore <game_key> <version_id> | custom <add|list|remove> | remote <login|logout|setup|peer|list> | backup <create|list|import|dir>",
                 env!("CARGO_PKG_VERSION")
             );
             2
@@ -106,6 +113,7 @@ fn cmd_via_daemon_or_direct(method: Method) -> i32 {
         }
     };
     let payload = match &method {
+        Method::Shutdown => rt.prepare_shutdown(),
         Method::Scan => rt.scan(),
         Method::ReloadManifests => rt.reload_manifests(),
         Method::Lan { action } => rt.lan_action(action.clone()),

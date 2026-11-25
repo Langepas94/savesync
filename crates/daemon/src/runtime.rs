@@ -16,6 +16,7 @@ use savesync_core::paths::{Platform, Roots};
 use savesync_core::scanner::{self, FoundGame};
 
 pub struct Runtime {
+    pub shutdown_requested: bool,
     pub config: Config,
     pub manifests: ManifestDb,
     pub platform: Platform,
@@ -69,6 +70,7 @@ impl Runtime {
         let platform = Platform::current();
         let roots = Roots::detect(platform);
         let mut runtime = Runtime {
+            shutdown_requested: false,
             config,
             manifests,
             platform,

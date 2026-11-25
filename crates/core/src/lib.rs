@@ -31,3 +31,5 @@ pub mod bundled_manifests;
 mod index_journal;
 
 mod publication_cache;
+
+pub mod updates;
