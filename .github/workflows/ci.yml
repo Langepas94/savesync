@@ -84,10 +84,32 @@ jobs:
       # Структурная проверка манифеста плагина.
       - run: python -c "import json; m=json.load(open('decky-plugin/plugin.json')); assert m['name'] and 'publish' in m"
 
+  windows-installer:
+    name: windows installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p savesync-daemon -p savesync-app
+      - name: ensure Inno Setup compiler
+        shell: pwsh
+        run: ./packaging/windows/ensure-compiler.ps1
+      - name: compile development installer
+        shell: pwsh
+        run: ./packaging/windows/build.ps1 -SourceDir target/debug
+      - name: isolated silent install upgrade uninstall
+        shell: pwsh
+        run: ./packaging/windows/smoke.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: savesync-development-installer
+          path: dist/savesync-setup-dev.exe*
+
   release:
     name: release artifacts
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [fmt, clippy, test, decky-plugin]
+    needs: [fmt, clippy, test, decky-plugin, windows-installer]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -106,9 +128,69 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev libdbus-1-dev pkg-config
       - uses: Swatinem/rust-cache@v2
+      - name: validate release version
+        shell: python
+        run: |
+          import os, re
+          version = re.search(r'^version = "([^"]+)"', open("Cargo.toml").read(), re.MULTILINE).group(1)
+          assert os.environ["GITHUB_REF_NAME"] == "v" + version, "tag must match workspace version"
+      - name: ensure release installer compiler
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./packaging/windows/ensure-compiler.ps1
+      - name: import Windows signing identity
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          SAVESYNC_SIGNING_PFX_BASE64: ${{ secrets.SAVESYNC_SIGNING_PFX_BASE64 }}
+          SAVESYNC_SIGNING_PFX_PASSWORD: ${{ secrets.SAVESYNC_SIGNING_PFX_PASSWORD }}
+        run: ./packaging/windows/prepare-signing.ps1
       - run: cargo build --release --workspace --target ${{ matrix.target }}
+      - name: build signed Windows package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          ./packaging/windows/build.ps1 -SourceDir target/${{ matrix.target }}/release -Version $version -Signed
+      - name: build SteamOS package
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          npm ci --prefix decky-plugin
+          npm run build --prefix decky-plugin
+          mkdir -p dist/savesync-steamos/systemd
+          cp target/${{ matrix.target }}/release/savesync-daemon target/${{ matrix.target }}/release/savesync-app dist/savesync-steamos/
+          cp packaging/install-steamos.sh dist/savesync-steamos/
+          cp packaging/systemd/savesync.service dist/savesync-steamos/systemd/
+          mkdir -p dist/savesync-steamos/decky-plugin/dist
+          cp decky-plugin/main.py decky-plugin/plugin.json decky-plugin/package.json dist/savesync-steamos/decky-plugin/
+          cp -r decky-plugin/dist/. dist/savesync-steamos/decky-plugin/dist/
+          tar -czf dist/savesync-steamos.tar.gz -C dist savesync-steamos
+          cd dist && sha256sum savesync-steamos.tar.gz > savesync-steamos.tar.gz.sha256
+
       - name: upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: savesync-${{ matrix.target }}
-          path: target/${{ matrix.target }}/release/savesync-*
+          path: |
+            dist/savesync-setup.exe*
+            dist/savesync-steamos.tar.gz*
+
+  publish-draft:
+    name: signed release draft
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: savesync-x86_64-*
+          path: artifacts
+          merge-multiple: true
+      - name: create reviewable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --draft --title "SaveSync $GITHUB_REF_NAME" --generate-notes artifacts/*

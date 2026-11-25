@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 pub enum Method {
     /// Состояние демона и игр (для трея/шторки).
     Status,
+    /// Stop accepting work after active runtime operations finish.
+    Shutdown,
     /// Пересканировать систему, вернуть найденные игры.
     Scan,
     /// Reload installed/curated/custom manifests and rescan without restart.
@@ -122,6 +124,7 @@ pub struct RpcError {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum ResponsePayload {
+    Stopped,
     Lan(crate::lan::LanPayload),
     OAuthStart(OAuthStartPayload),
     OAuthStatus(OAuthStatusPayload),

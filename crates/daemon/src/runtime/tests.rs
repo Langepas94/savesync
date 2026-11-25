@@ -28,6 +28,7 @@ impl World {
         )
         .unwrap();
         Runtime {
+            shutdown_requested: false,
             config: Config {
                 version: 1,
                 device_id: name.into(),

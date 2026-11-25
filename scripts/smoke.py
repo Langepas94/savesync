@@ -152,14 +152,21 @@ def run(binary: Path) -> None:
                         command("pc", "sync", "smoke-game")
                         command("deck", "sync", "smoke-game")
                         assert (root / "deck/home/saves/slot.sav").read_text() == "progress over authenticated QUIC"
+                        command("deck", "stop")
+                        assert deck_daemon.wait(timeout=5) == 0
                     finally:
-                        deck_daemon.terminate()
+                        if deck_daemon.poll() is None:
+                            deck_daemon.terminate()
                         deck_daemon.wait(timeout=5)
                 second = subprocess.run([str(binary), "serve"], env=environments["pc"],
                                         capture_output=True, timeout=5)
                 assert second.returncode != 0, "second daemon unexpectedly acquired the IPC socket"
+                command("pc", "stop")
+                assert daemon.wait(timeout=5) == 0
+                command("pc", "status", expect=1, parse=False)
             finally:
-                daemon.terminate()
+                if daemon.poll() is None:
+                    daemon.terminate()
                 daemon.wait(timeout=5)
         print("PASS: CLI scan, two-device sync, safety backup, conflict resolution, rescan,")
         print("      portable backup/import, Windows custom keys, isolated IPC, second-instance guard, paired QUIC LAN")

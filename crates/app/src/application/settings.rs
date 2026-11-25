@@ -109,6 +109,9 @@ impl SaveSyncApp {
     }
 
     pub(super) fn view_settings(&mut self, ui: &mut egui::Ui) {
+        let busy = self.busy();
+        self.updates.view(ui, busy);
+        ui.separator();
         ui.heading("Настройки");
         ui.add_space(8.0);
 

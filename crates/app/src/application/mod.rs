@@ -16,6 +16,7 @@ mod games;
 mod settings;
 #[cfg(test)]
 mod tests;
+mod updates;
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
 struct JobDone {
     lan: Option<savesync_core::lan::LanPayload>,
@@ -39,6 +40,11 @@ enum Tab {
 }
 
 pub(crate) struct SaveSyncApp {
+    updates: updates::Updates,
+    #[cfg(windows)]
+    tray: Option<crate::tray::Tray>,
+    #[cfg(windows)]
+    allow_exit: bool,
     lan: Option<savesync_core::lan::LanPayload>,
     lan_address: String,
     lan_pair_pin: String,
@@ -61,6 +67,11 @@ pub(crate) struct SaveSyncApp {
 impl SaveSyncApp {
     pub(crate) fn new() -> Self {
         SaveSyncApp {
+            updates: updates::Updates::default(),
+            #[cfg(windows)]
+            tray: None,
+            #[cfg(windows)]
+            allow_exit: false,
             lan: None,
             lan_address: String::new(),
             lan_pair_pin: String::new(),
@@ -81,6 +92,60 @@ impl SaveSyncApp {
         }
     }
 
+    pub(crate) fn initialize_desktop(
+        &mut self,
+        context: &egui::Context,
+        minimized: bool,
+        startup_error: Option<String>,
+    ) {
+        #[cfg(windows)]
+        {
+            match crate::tray::Tray::new(context) {
+                Ok(tray) => {
+                    self.tray = Some(tray);
+                    if minimized {
+                        context.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+                    }
+                }
+                Err(error) => self.set_notice(format!("Трей недоступен: {error}"), true),
+            }
+        }
+        #[cfg(not(windows))]
+        let _ = (context, minimized);
+        if let Some(error) = startup_error {
+            self.set_notice(error, true);
+        }
+    }
+    #[cfg(windows)]
+    fn poll_tray(&mut self, context: &egui::Context) {
+        while let Some(action) = self.tray.as_ref().and_then(|tray| tray.next()) {
+            match action {
+                crate::tray::Action::Open => {
+                    context.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                    context.send_viewport_cmd(egui::ViewportCommand::Focus);
+                }
+                crate::tray::Action::Hide => {
+                    context.send_viewport_cmd(egui::ViewportCommand::Visible(false))
+                }
+                crate::tray::Action::Sync => {
+                    if !self.busy() {
+                        self.sync_all();
+                    }
+                }
+                crate::tray::Action::Quit => {
+                    self.allow_exit = true;
+                    context.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            }
+        }
+        if self.tray.is_some()
+            && !self.allow_exit
+            && context.input(|input| input.viewport().close_requested())
+        {
+            context.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            context.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        }
+    }
     fn set_notice(&mut self, text: String, is_error: bool) {
         self.notice = Some((text, is_error));
     }
@@ -327,6 +392,16 @@ impl SaveSyncApp {
 
 impl eframe::App for SaveSyncApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if crate::lifecycle::consume_exit_request() {
+            #[cfg(windows)]
+            {
+                self.allow_exit = true;
+            }
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+        #[cfg(windows)]
+        self.poll_tray(ctx);
+        self.updates.poll();
         ctx.request_repaint_after(Duration::from_millis(500));
 
         // Периодический опрос демона (быстрый локальный RPC).

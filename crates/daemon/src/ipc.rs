@@ -55,9 +55,28 @@ fn handle_conn(stream: LocalSocketStream, runtime: Arc<Mutex<Runtime>>) -> std::
             Ok(req) => dispatch(req, &runtime),
             Err(e) => Response::err(0, format!("bad request: {e}")),
         };
-        writer.write_all(response.encode()?.as_bytes())?;
-        writer.flush()?;
+        if write_response(&mut writer, response)? {
+            // Shutdown was serialized by Runtime's mutex. Later requests are rejected.
+            std::process::exit(0);
+        }
     }
+}
+
+fn write_response(writer: &mut impl Write, response: Response) -> std::io::Result<bool> {
+    let stopping = matches!(
+        response.result,
+        Some(savesync_core::ipc::ResponsePayload::Stopped)
+    );
+    let delivery = response
+        .encode()
+        .map_err(std::io::Error::other)
+        .and_then(|encoded| writer.write_all(encoded.as_bytes()))
+        .and_then(|()| writer.flush());
+    // A disconnected stop caller must not leave a live, permanently stopping daemon.
+    if stopping {
+        return Ok(true);
+    }
+    delivery.map(|()| false)
 }
 
 fn dispatch(req: Request, runtime: &Arc<Mutex<Runtime>>) -> Response {
@@ -65,7 +84,11 @@ fn dispatch(req: Request, runtime: &Arc<Mutex<Runtime>>) -> Response {
         Ok(rt) => rt,
         Err(_) => return Response::err(req.id, "daemon state poisoned"),
     };
+    if rt.shutdown_requested {
+        return Response::err(req.id, "daemon is stopping");
+    }
     let payload = match &req.method {
+        Method::Shutdown => rt.prepare_shutdown(),
         Method::Status => rt.status(),
         Method::Scan => rt.scan(),
         Method::ReloadManifests => rt.reload_manifests(),
@@ -131,6 +154,7 @@ mod tests {
             backups: Default::default(),
         };
         Runtime {
+            shutdown_requested: false,
             config,
             manifests: Default::default(),
             platform: savesync_core::paths::Platform::current(),
@@ -210,5 +234,23 @@ mod tests {
         );
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+    #[test]
+    fn shutdown_finishes_even_if_caller_disconnects() {
+        struct Broken;
+        impl Write for Broken {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::ErrorKind::BrokenPipe.into())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Err(std::io::ErrorKind::BrokenPipe.into())
+            }
+        }
+        assert!(write_response(
+            &mut Broken,
+            Response::ok(1, savesync_core::ipc::ResponsePayload::Stopped)
+        )
+        .unwrap());
+        assert!(write_response(&mut Broken, Response::err(1, "ordinary response")).is_err());
     }
 }

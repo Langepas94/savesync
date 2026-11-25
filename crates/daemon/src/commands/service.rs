@@ -21,6 +21,9 @@ pub(crate) fn cmd_serve() -> i32 {
                 Ok(rt) => rt,
                 Err(_) => continue,
             };
+            if rt.shutdown_requested {
+                break;
+            }
             if rt.auto_backup_due() {
                 match rt.run_auto_backup() {
                     Ok(n) => {

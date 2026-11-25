@@ -28,6 +28,8 @@ rcgen = "0.13.2"
 mdns-sd = "0.17"
 ed25519-dalek = { version = "2", features = ["pkcs8", "rand_core"] }
 quinn = { version = "0.11.9", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
+semver = "1"
+sha2 = "0.10"
 
 [target."cfg(windows)".dependencies]
 winreg = "0.56.0"

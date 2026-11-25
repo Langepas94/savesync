@@ -7,7 +7,8 @@ Google Drive и/или прямая LAN-синхронизация.
 
 **Статус:** версия в разработке, к релизу 1.0.0 пока не готова.
 Реализованы ручная синхронизация, история, конфликты, бэкапы, desktop UI
-и Decky-прокси. Windows-доставка ещё требует завершения. Конкурентные облачные версии
+и Decky-прокси. Windows-доставка реализована; подпись release требует сертификат владельца
+([настройка](docs/WINDOWS-DELIVERY.md)). Конкурентные облачные версии
 сохраняются журналом immutable publications ([описание](docs/INDEX-PUBLICATIONS.md)). Защищённый LAN с SPAKE2/QUIC и подтверждением SAS готов
 ([сопряжение](docs/LAN.md)). Настраиваемый OAuth реализован; живой вход требует
 регистрации приложений Google/Яндекс. См. [QA-отчёт](docs/QA-2026-11-25.md).
@@ -99,14 +100,18 @@ savesync-daemon manifests import /путь/к/savesync-manifests
 
 ### Windows
 
-1. Собрать проект через `cargo build --release --workspace`.
-   Демон и приложение находятся в `target/release`. Подпись кода отсутствует —
-   Windows SmartScreen может показать предупреждение.
-2. Автозапуск демона — добавить в `HKCU\Software\Microsoft\Windows\
-   CurrentVersion\Run` команду `savesync-daemon serve`
-   (user-context, не SYSTEM-сервис).
-3. Запустить `savesync-app.exe`: экран «Подключения» — OAuth Яндекс.Диска
-   и/или Google Drive ([настройка](docs/OAUTH.md)), LAN по PIN либо локальные бэкапы.
+1. Для подписанного release используйте `savesync-setup.exe`: установка в профиль
+   пользователя, без SYSTEM-службы. До настройки сертификата доступны только
+   `savesync-setup-dev.exe` и сборка из исходников; dev package не является релизом.
+2. Установщик предлагает HKCU autostart. Приложение запускает daemon скрыто;
+   окно закрывается в трей. Повторный запуск открывает существующее окно.
+3. «Подключения» — OAuth ([настройка](docs/OAUTH.md)), LAN с SAS
+   ([сопряжение](docs/LAN.md)) либо локальные бэкапы.
+4. «Настройки → Проверить Releases»: подписанное обновление, проверка publisher
+   pin, версии и SHA256. Upgrade ждёт завершения sync. Для приватного репозитория
+   нужен read-only `SAVESYNC_GITHUB_TOKEN`.
+
+[Сборка, Secrets, uninstall и ограничения](docs/WINDOWS-DELIVERY.md).
 
 ### Steam Deck (SteamOS)
 
@@ -121,7 +126,7 @@ savesync-daemon manifests import /путь/к/savesync-manifests
 ### Общее
 
 - Требования: Windows 10+, SteamOS 3.x.
-- Обновление: ручная замена бинарей; in-app updater пока не реализован.
+- Обновление: Windows — проверяемый installer из UI; SteamOS — userspace install script.
 - Удаление: остановить демон/сервис, удалить данные
   `~/.local/share/savesync` / `%APPDATA%\savesync`.
 
