@@ -14,20 +14,8 @@ Before creating a release tag, configure a dedicated Ed25519 key pair:
 
 The SteamOS release build embeds the public key, and release signing checks that it matches the private key. Install one build containing the intended public key before expecting in-app updates; older builds cannot gain trust in a new key automatically. Keep the key stable across releases. A missing key disables installation rather than accepting unsigned updates.
 
-The published release must be stable and contain the platform-specific files. Drafts and prereleases are ignored. The optional `SAVESYNC_GITHUB_TOKEN` is needed only for a private repository; the token is not forwarded to the asset download host.
+The published release must be stable and contain the platform-specific files. Drafts and prereleases are ignored. The public GitHub repository permits update checks and downloads without a token.
 
 ## Steam Deck installation from GitHub
 
-Open [SaveSync Releases](https://github.com/Langepas94/savesync/releases) while signed in to a GitHub account with repository access. Download `SaveSync-SteamDeck.run`, allow the file to run in Dolphin, then open it in Desktop Mode. This installs the build containing the trusted update key.
-
-To check for later private releases inside SaveSync, create a fine-grained token restricted to this repository with **Contents: Read-only**. In SaveSync, open **Settings → Updates → Access to private releases**, paste the token, and save it to the system credential store.
-
-If the credential store is unavailable, close SaveSync, open Konsole, then run the following. The prompt hides the token and the commands leave it out of shell history.
-
-```bash
-read -rsp 'SaveSync GitHub token: ' SAVESYNC_GITHUB_TOKEN; printf '\n'
-SAVESYNC_GITHUB_TOKEN="$SAVESYNC_GITHUB_TOKEN" "$HOME/.local/bin/savesync-app" &
-unset SAVESYNC_GITHUB_TOKEN
-```
-
-In SaveSync, open **Settings → Updates → Check for updates**. The token applies to the launched session. Browser downloads remain available from the Releases page after signing in.
+Download [SaveSync-SteamDeck.run](https://github.com/Langepas94/savesync/releases/latest/download/SaveSync-SteamDeck.run), allow the file to run in Dolphin, then open it in Desktop Mode. For future updates, select **Settings → Updates → Check for updates** in SaveSync.

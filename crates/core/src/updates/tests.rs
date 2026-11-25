@@ -5,7 +5,7 @@ fn release_check_distinguishes_an_empty_release_feed_from_denied_access() {
     use std::io::{BufRead, BufReader};
     use std::net::TcpListener;
 
-    for (repository_status, token) in [("200 OK", Some("test")), ("404 Not Found", None)] {
+    for repository_status in ["200 OK", "404 Not Found"] {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let api_base = format!("http://{}/repos/savesync", listener.local_addr().unwrap());
         let server = std::thread::spawn(move || {
@@ -20,12 +20,9 @@ fn release_check_distinguishes_an_empty_release_feed_from_denied_access() {
                     .take_while(|line| !line.is_empty())
                     .collect();
                 assert_eq!(headers[0], format!("GET {path} HTTP/1.1"));
-                assert_eq!(
-                    headers
-                        .iter()
-                        .any(|header| header.eq_ignore_ascii_case("authorization: Bearer test")),
-                    token.is_some()
-                );
+                assert!(!headers
+                    .iter()
+                    .any(|header| header.to_ascii_lowercase().starts_with("authorization:")));
                 write!(
                     stream,
                     "HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
@@ -38,15 +35,12 @@ fn release_check_distinguishes_an_empty_release_feed_from_denied_access() {
             agent: ureq::AgentBuilder::new()
                 .timeout(std::time::Duration::from_secs(2))
                 .build(),
-            token: token.map(str::to_owned),
         };
         let result = check_with(&client);
-        if token.is_some() {
+        if repository_status == "200 OK" {
             assert!(matches!(result, Ok(ReleaseCheck::NoPublishedRelease)));
         } else {
-            assert!(
-                matches!(result, Err(error) if error.kind() == io::ErrorKind::PermissionDenied)
-            );
+            assert!(matches!(result, Err(error) if error.kind() == io::ErrorKind::NotFound));
         }
         server.join().unwrap();
     }

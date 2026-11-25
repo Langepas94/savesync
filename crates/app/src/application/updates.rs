@@ -13,7 +13,6 @@ pub(super) struct Updates {
     message: String,
     failed: bool,
     last_check: Option<std::time::Instant>,
-    github_token: String,
 }
 impl Updates {
     fn check(&mut self) {
@@ -139,45 +138,6 @@ impl Updates {
                 let _ = webbrowser::open(&release.page_url);
             }
         }
-        ui.collapsing("Доступ к приватным релизам", |ui| {
-            ui.label("Токен GitHub с правом Contents: Read-only для репозитория SaveSync.");
-            ui.hyperlink_to(
-                "Создать токен GitHub",
-                "https://github.com/settings/personal-access-tokens/new",
-            );
-            ui.add(
-                egui::TextEdit::singleline(&mut self.github_token)
-                    .password(true)
-                    .hint_text("Токен GitHub"),
-            );
-            ui.horizontal(|ui| {
-                let idle = self.job.is_none();
-                if ui
-                    .add_enabled(
-                        idle && !self.github_token.trim().is_empty(),
-                        egui::Button::new("Сохранить токен"),
-                    )
-                    .clicked()
-                {
-                    let token = std::mem::take(&mut self.github_token);
-                    self.begin_check(move || {
-                        updates::save_github_token(token)
-                            .and_then(|()| updates::check())
-                            .map_err(|error| error.to_string())
-                    });
-                }
-                if ui
-                    .add_enabled(idle, egui::Button::new("Удалить сохранённый токен"))
-                    .clicked()
-                {
-                    self.begin_check(|| {
-                        updates::remove_github_token()
-                            .and_then(|()| updates::check())
-                            .map_err(|error| error.to_string())
-                    });
-                }
-            });
-        });
     }
 }
 #[cfg(test)]

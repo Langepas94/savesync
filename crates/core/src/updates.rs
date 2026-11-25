@@ -1,5 +1,4 @@
 //! Stable GitHub release checks and verified Windows installer handoff.
-use crate::credentials::{OsSecretStore, SecretStore};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{
@@ -9,26 +8,6 @@ use std::{
 const API: &str = "https://api.github.com/repos/Langepas94/savesync";
 const INSTALLER: &str = "savesync-setup.exe";
 const MAX_INSTALLER: u64 = 300 * 1024 * 1024;
-const GITHUB_TOKEN_KEY: &str = "github-release-token";
-
-pub fn save_github_token(token: String) -> io::Result<()> {
-    let token = zeroize::Zeroizing::new(token);
-    let trimmed = token.trim();
-    if trimmed.is_empty() || !trimmed.bytes().all(|byte| byte.is_ascii_graphic()) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "Введите токен GitHub",
-        ));
-    }
-    OsSecretStore.put(GITHUB_TOKEN_KEY, trimmed)
-}
-
-pub fn remove_github_token() -> io::Result<()> {
-    match OsSecretStore.delete(GITHUB_TOKEN_KEY) {
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-        result => result,
-    }
-}
 #[derive(Debug, Clone, Deserialize)]
 struct Asset {
     id: u64,
@@ -60,7 +39,6 @@ struct Metadata {
 struct Client {
     api_base: String,
     agent: ureq::Agent,
-    token: Option<String>,
 }
 impl Client {
     fn new() -> Self {
@@ -70,25 +48,16 @@ impl Client {
                 .timeout(std::time::Duration::from_secs(90))
                 .redirects(0)
                 .build(),
-            token: std::env::var("SAVESYNC_GITHUB_TOKEN")
-                .ok()
-                .map(|token| token.trim().to_owned())
-                .filter(|token| !token.is_empty())
-                .or_else(|| OsSecretStore.get(GITHUB_TOKEN_KEY).ok()),
         }
     }
     fn api(&self, path: &str, accept: &str) -> ureq::Request {
-        let mut request = self
-            .agent
+        self.agent
             .get(&format!("{}{path}", self.api_base))
             .set("User-Agent", "SaveSync")
             .set("Accept", accept)
-            .set("X-GitHub-Api-Version", "2022-11-28");
-        if let Some(token) = &self.token {
-            request = request.set("Authorization", &format!("Bearer {token}"));
-        }
-        request
+            .set("X-GitHub-Api-Version", "2022-11-28")
     }
+
     fn asset(&self, id: u64) -> io::Result<ureq::Response> {
         let response = self
             .api(
@@ -114,7 +83,7 @@ impl Client {
             {
                 return Err(io::Error::other("unexpected release download origin"));
             }
-            // The API token is never forwarded to the signed asset URL.
+            // Download only from trusted release asset hosts.
             return self.agent.get(location).call().map_err(network_error);
         }
         Ok(response)
@@ -208,13 +177,9 @@ fn check_with(client: &Client) -> io::Result<ReleaseCheck> {
             // GitHub uses 404 for both a hidden repository and a missing stable release.
             return match client.api("", accept).call() {
                 Ok(_) => Ok(ReleaseCheck::NoPublishedRelease),
-                Err(ureq::Error::Status(404, _)) if client.token.is_none() => Err(io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    "Репозиторий обновлений недоступен. Добавьте токен в разделе «Доступ к приватным релизам».",
-                )),
                 Err(ureq::Error::Status(404, _)) => Err(io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    "Репозиторий обновлений недоступен. Проверьте доступ токена к репозиторию SaveSync.",
+                    io::ErrorKind::NotFound,
+                    "Репозиторий обновлений недоступен.",
                 )),
                 Err(error) => Err(network_error(error)),
             };
