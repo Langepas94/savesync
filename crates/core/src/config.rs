@@ -46,10 +46,10 @@ pub struct BackendsConfig {
 /// хранится как blake3-хеш.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LanConfig {
-    /// Порт TCP-сервера для пиров.
+    /// QUIC/UDP listener port.
     pub port: u16,
-    /// Pairing PIN (в конфиге — открытым текстом; на проверку уходит
-    /// только хеш). Защита от случайных подключений, не от MitM.
+    /// Legacy setting retained for config compatibility. Enrollment now uses a
+    /// random, short-lived PIN and explicit SAS confirmation; this value grants no access.
     pub pin: String,
     /// Адреса пиров (`host:port`), с которыми синкаемся напрямую.
     #[serde(default)]

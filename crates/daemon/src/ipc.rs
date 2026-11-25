@@ -69,6 +69,7 @@ fn dispatch(req: Request, runtime: &Arc<Mutex<Runtime>>) -> Response {
         Method::Status => rt.status(),
         Method::Scan => rt.scan(),
         Method::ReloadManifests => rt.reload_manifests(),
+        Method::Lan { action } => rt.lan_action(action.clone()),
         Method::OAuthBegin { provider } => rt.oauth_begin(*provider),
         Method::OAuthPoll { provider } => rt.oauth_poll(*provider),
         Method::OAuthCancel { provider } => rt.oauth_cancel(*provider),

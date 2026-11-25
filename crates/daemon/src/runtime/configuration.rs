@@ -34,6 +34,9 @@ impl Runtime {
         } else {
             None
         };
+        if let (Some(server), Some(lan)) = (&replacement, config.backends.lan.as_mut()) {
+            lan.port = server.port;
+        }
         let rebuilt = Runtime::new(config.clone(), self.state_dir.clone())?;
         let path = self
             .state_dir

@@ -21,6 +21,13 @@ keyring = { version = "3.6.3", default-features = false, features = ["windows-na
 oauth2 = { version = "5.0.0", default-features = false }
 url = "2.5.9"
 subtle = "2.6.1"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+tokio = { version = "1", features = ["rt-multi-thread", "io-util", "sync", "time", "net"] }
+spake2 = "0.4"
+rcgen = "0.13.2"
+mdns-sd = "0.17"
+ed25519-dalek = { version = "2", features = ["pkcs8", "rand_core"] }
+quinn = { version = "0.11.9", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
 
 [target."cfg(windows)".dependencies]
 winreg = "0.56.0"

@@ -210,14 +210,31 @@ fn saving_config_updates_and_disables_live_lan_listener() {
     assert!(matches!(pc.save_config(config), ResponsePayload::Config(_)));
     let port = pc.lan_server.as_ref().unwrap().port;
     let address = format!("127.0.0.1:{port}");
-    assert!(LanBackend::new(&address, "1111").ping().is_ok());
+    let identity = world.dir.join("client-identity");
+    pc.lan_server
+        .as_ref()
+        .unwrap()
+        .open_pairing("123456")
+        .unwrap();
+    let offer = savesync_core::lan::pair(&identity, &address, "123456").unwrap();
+    savesync_core::lan::confirm(&identity, &offer.peer_id).unwrap();
+    let server_identity = pc.state_dir.join("lan-identity");
+    let client_id = savesync_core::lan::peers(&server_identity).unwrap()[0]
+        .peer
+        .id
+        .clone();
+    savesync_core::lan::confirm(&server_identity, &client_id).unwrap();
+    assert!(LanBackend::with_identity(&address, &identity)
+        .ping()
+        .is_ok());
     let mut config = pc.config.clone();
     let lan = config.backends.lan.as_mut().unwrap();
     lan.port = port;
     lan.pin = "2222".into();
     assert!(matches!(pc.save_config(config), ResponsePayload::Config(_)));
-    assert!(LanBackend::new(&address, "1111").ping().is_err());
-    assert!(LanBackend::new(&address, "2222").ping().is_ok());
+    assert!(LanBackend::with_identity(&address, &identity)
+        .ping()
+        .is_ok());
     let mut config = pc.config.clone();
     config.backends.lan = None;
     assert!(matches!(pc.save_config(config), ResponsePayload::Config(_)));

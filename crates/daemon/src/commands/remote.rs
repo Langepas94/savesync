@@ -4,6 +4,9 @@
 use super::*;
 pub(crate) fn cmd_remote(args: &[String]) -> i32 {
     use savesync_core::config::{GoogleConfig, YandexConfig};
+    if args.first().is_some_and(|arg| arg == "lan") {
+        return super::networking::command(&args[1..]);
+    }
     if args.first().is_some_and(|arg| arg == "login") {
         return super::authorization::login(&args[1..]);
     }
