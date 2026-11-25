@@ -63,10 +63,17 @@ def run(binary: Path) -> None:
         scan = command("pc", "scan")
         assert scan["data"]["found"] == 1, scan
         outcome("pc", "uploaded", "sync", "smoke-game")
-        outcome("deck", "applied", "sync", "smoke-game")
+        outcome("deck", "conflict", "sync", "smoke-game", exit_code=1)
+        assert (root / "deck/home/saves/slot.sav").read_text() == "deck-original"
+        history = command("deck", "history", "smoke-game")["data"]
+        assert len(history["heads"]) == 2, history
+        selected = next(version["id"] for version in history["versions"]
+                        if version["id"] in history["heads"] and version["device"] == "pc")
+        outcome("deck", "applied", "restore", "smoke-game", selected)
         assert (root / "deck/home/saves/slot.sav").read_text() == "pc-original"
         assert list((root / "deck/appdata/savesync/state/backups").rglob("slot.sav"))
         outcome("deck", "up_to_date", "sync", "smoke-game")
+        outcome("pc", "applied", "sync", "smoke-game")
 
         save("pc", "pc-branch")
         outcome("pc", "uploaded", "sync", "smoke-game")
