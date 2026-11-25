@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### Discovery
+
+- Runtime подключает локальный Steam appinfo/UFS и дополнительные библиотеки;
+  реестр Steam Windows, стандартные каталоги Linux и Flatpak, canonical roots.
+- Встроенные 17 манифестов с отдельной лицензией и команда `manifests import`
+  с полной проверкой, atomic replacement и hot reload через IPC.
+- Игры без созданных сейвов видны в каталоге и могут принять удалённую версию;
+  пустые snapshots не публикуются. Curated fallback/portability и custom rules
+  сохраняются, пересекающиеся правила не дублируют файлы.
+
+
 ### Fixed
 
 - Проверка структуры снапшотов, размеров и агрегированного хеша; запрет

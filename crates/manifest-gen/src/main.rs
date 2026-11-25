@@ -11,10 +11,8 @@
 
 use std::path::{Path, PathBuf};
 
-use savesync_core::game_key;
-use savesync_core::manifest::Manifest;
 use savesync_core::steam::appinfo;
-use savesync_core::steam::ufs::to_path_rules;
+use savesync_core::steam::ufs::manifest_from_entry;
 
 #[derive(Debug, Default)]
 pub struct GenStats {
@@ -60,39 +58,11 @@ pub fn generate(
         }
         stats.games_seen += 1;
 
-        let slug = game_key::slugify(&name);
-        if slug.is_empty() {
+        let Some(manifest) = manifest_from_entry(entry) else {
             stats.skipped_no_paths += 1;
             continue;
-        }
-
-        // UFS savefiles → правила путей (включая Proton-двойники).
-        let mut paths = Vec::new();
-        for sf in entry.ufs_savefiles() {
-            paths.extend(to_path_rules(entry.appid, &sf));
-        }
-        if paths.is_empty() {
-            stats.skipped_no_paths += 1;
-            continue;
-        }
-        // Дедупликация одинаковых паттернов (несколько UFS-записей могут
-        // дать одинаковые правила).
-        paths.sort_by(|a, b| a.pattern.cmp(&b.pattern));
-        paths.dedup_by(|a, b| a.pattern == b.pattern && a.os == b.os);
-
-        let manifest = Manifest {
-            schema: 1,
-            name: name.clone(),
-            slug: slug.clone(),
-            aliases: vec![name.clone()],
-            ids: savesync_core::manifest::Ids {
-                steam: vec![entry.appid.to_string()],
-                ..Default::default()
-            },
-            paths,
-            registry: Vec::new(),
-            portability: Default::default(),
         };
+        let slug = manifest.slug.clone();
 
         let errors = manifest.validate();
         if !errors.is_empty() {

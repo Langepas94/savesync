@@ -18,6 +18,16 @@ impl<B: Backend> Engine<B> {
         let tmp_snap = tmp_dir.join(format!("{component}.zip"));
 
         let manifest = snapshot::create(game_key, &self.device_id, locations, &tmp_snap)?;
+        if manifest
+            .locations
+            .iter()
+            .all(|location| location.files.is_empty())
+        {
+            std::fs::remove_file(&tmp_snap).ok();
+            return Err(
+                io::Error::new(io::ErrorKind::InvalidInput, "no save files to upload").into(),
+            );
+        }
 
         let mut local = self.load_local()?;
         let applied = self.applied_of(game_key);

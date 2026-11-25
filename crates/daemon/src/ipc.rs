@@ -68,6 +68,7 @@ fn dispatch(req: Request, runtime: &Arc<Mutex<Runtime>>) -> Response {
     let payload = match &req.method {
         Method::Status => rt.status(),
         Method::Scan => rt.scan(),
+        Method::ReloadManifests => rt.reload_manifests(),
         Method::Sync { game_key } => rt.sync(game_key.as_deref()),
         Method::History { game_key } => rt.history(game_key),
         Method::Restore {

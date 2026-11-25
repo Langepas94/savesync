@@ -16,3 +16,6 @@ glob.workspace = true
 zip.workspace = true
 ureq.workspace = true
 interprocess.workspace = true
+
+[target."cfg(windows)".dependencies]
+winreg = "0.56.0"

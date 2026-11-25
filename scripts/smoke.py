@@ -38,9 +38,9 @@ def run(binary: Path) -> None:
                 "backups": {"dir": str(root / device / "backups"), "keep": 3},
             }), encoding="utf-8")
             environment = os.environ.copy()
-            environment.update(APPDATA=str(appdata), XDG_DATA_HOME=str(appdata),
+            environment.update(APPDATA=str(appdata), LOCALAPPDATA=str(root / device / "localappdata"), XDG_DATA_HOME=str(appdata), XDG_CONFIG_HOME=str(root / device / "config"),
                                HOME=str(home), USERPROFILE=str(home),
-                               SAVESYNC_SOCKET=namespace + "-" + device)
+                               SAVESYNC_SOCKET=namespace + "-" + device, SAVESYNC_STEAM_ROOT=str(root / "empty-steam"))
             environments[device] = environment
 
         def command(device, *args, expect=0, parse=True):
@@ -57,7 +57,8 @@ def run(binary: Path) -> None:
             assert payload["data"]["results"][0]["outcome"] == expected, payload
             return payload
 
-        assert command("pc", "scan")["data"]["found"] == 1
+        scan = command("pc", "scan")
+        assert scan["data"]["found"] == 1, scan
         outcome("pc", "uploaded", "sync", "smoke-game")
         outcome("deck", "applied", "sync", "smoke-game")
         assert (root / "deck/home/saves/slot.sav").read_text() == "pc-original"
@@ -86,6 +87,8 @@ def run(binary: Path) -> None:
         command("pc", "backup", "import", str(backups[0]), parse=False)
         command("pc", "custom", "add", "Custom Test", "--path", "<home>/saves/*.sav", parse=False)
         outcome("pc", "uploaded", "sync", "custom:custom-test")
+        command("pc", "manifests", "import", str(manifests), parse=False)
+        assert "custom:custom-test" in command("pc", "custom", "list", parse=False)
 
         # A separate namespace avoids touching any real user's running daemon.
         log = root / "daemon.log"

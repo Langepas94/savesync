@@ -47,12 +47,35 @@ pub fn scan(db: &ManifestDb, platform: Platform, roots: &Roots) -> Vec<FoundGame
 
     for manifest in db.iter() {
         let mut locations = Vec::new();
+        let mut seen = std::collections::HashSet::new();
 
         for rule in manifest.paths_for(platform) {
             for resolved in resolve_pattern_multi(&rule.pattern, roots) {
-                let hits = glob::glob(&resolved)
-                    .map(|paths| paths.flatten().collect::<Vec<_>>())
-                    .unwrap_or_default();
+                let resolved = crate::paths::canonical_pattern(&resolved);
+                let mut hits = Vec::new();
+                let base = crate::snapshot::location_base(&resolved);
+                if let Ok(paths) = glob::glob(&resolved) {
+                    for path in paths {
+                        let hit = match path {
+                            Ok(hit) => hit,
+                            Err(error) => error.path().to_path_buf(),
+                        };
+                        let mut files = Vec::new();
+                        if crate::paths::validate_source_path(&base, &hit)
+                            .and_then(|_| collect_regular_files(&base, &hit, &mut files))
+                            .is_ok()
+                        {
+                            hits.extend(files);
+                        } else {
+                            // Preserve the failing path so strict snapshot traversal reports
+                            // the error instead of publishing the readable subset as success.
+                            hits.push(hit);
+                        }
+                    }
+                }
+                hits.sort();
+                hits.dedup();
+                hits.retain(|path| seen.insert(path.clone()));
                 if !hits.is_empty() {
                     locations.push(SaveLocation {
                         location: rule.location.clone(),
@@ -77,6 +100,49 @@ pub fn scan(db: &ManifestDb, platform: Platform, roots: &Roots) -> Vec<FoundGame
 
     found.sort_by(|a, b| a.game_key.cmp(&b.game_key));
     found
+}
+
+fn collect_regular_files(
+    base: &std::path::Path,
+    path: &std::path::Path,
+    out: &mut Vec<PathBuf>,
+) -> std::io::Result<()> {
+    crate::paths::validate_source_path(base, path)?;
+    let metadata = std::fs::symlink_metadata(path)?;
+    if metadata.is_file() {
+        out.push(path.to_path_buf());
+    } else if metadata.is_dir() {
+        for entry in std::fs::read_dir(path)? {
+            collect_regular_files(base, &entry?.path(), out)?;
+        }
+    }
+    Ok(())
+}
+
+/// Include installed/previously synced games and explicit custom rules even
+/// before their first save is created. Empty locations must never be uploaded.
+pub fn scan_catalog(
+    db: &ManifestDb,
+    platform: Platform,
+    roots: &Roots,
+    known: &std::collections::HashSet<String>,
+) -> Vec<FoundGame> {
+    let mut games = scan(db, platform, roots);
+    for manifest in db.iter() {
+        if (known.contains(&manifest.slug) || manifest.slug.starts_with("custom:"))
+            && !games.iter().any(|game| game.game_key == manifest.slug)
+        {
+            games.push(FoundGame {
+                game_key: manifest.slug.clone(),
+                display_name: manifest.name.clone(),
+                steam_appid: manifest.ids.steam.first().cloned(),
+                portable: manifest.portability.status,
+                locations: vec![],
+            });
+        }
+    }
+    games.sort_by(|a, b| a.game_key.cmp(&b.game_key));
+    games
 }
 
 #[cfg(test)]

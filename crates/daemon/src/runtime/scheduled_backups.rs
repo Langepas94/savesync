@@ -6,11 +6,14 @@ impl Runtime {
         let Some(dir) = self.config.backups.dir.clone() else {
             return Ok(0);
         };
-        self.last_scan = scanner::scan(&self.manifests, self.platform, &self.roots);
+        self.refresh_catalog();
         let keep = self.config.backups.keep.unwrap_or(10) as usize;
         let mut created = 0;
         let games = self.last_scan.clone();
         for g in &games {
+            if g.locations.is_empty() {
+                continue;
+            }
             savesync_core::backup::create_backup(
                 &g.game_key,
                 &self.config.device_id,

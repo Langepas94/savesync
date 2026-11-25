@@ -58,7 +58,10 @@ pub(super) fn resolve(
                 None
             }
         })?;
-    let resolved = resolve_pattern_multi(&rule.pattern, roots);
+    let resolved: Vec<_> = resolve_pattern_multi(&rule.pattern, roots)
+        .iter()
+        .map(|pattern| crate::paths::canonical_pattern(pattern))
+        .collect();
     let selected = resolved
         .iter()
         .find(|r| snapshot::location_base(r).exists())

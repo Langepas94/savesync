@@ -56,7 +56,7 @@ impl Runtime {
         }
         self.config = config;
         self.manifests = rebuilt.manifests;
-        self.last_scan = scanner::scan(&self.manifests, self.platform, &self.roots);
+        self.refresh_catalog();
         Ok(())
     }
 

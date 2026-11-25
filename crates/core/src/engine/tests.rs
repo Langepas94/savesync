@@ -541,3 +541,13 @@ fn missing_old_archive_does_not_block_latest_restore() {
         .unwrap();
     assert_eq!(deck.read_save(), "current");
 }
+
+#[test]
+fn empty_directory_cannot_be_uploaded_even_with_a_direct_engine_call() {
+    let world = World::new("empty-upload");
+    let pc = world.device("pc");
+    std::fs::create_dir_all(pc.home.join("game/saves")).unwrap();
+    assert!(pc.engine.push("test-game", &pc.locations()).is_err());
+    assert!(pc.engine.load_remote().unwrap().game("test-game").is_none());
+    assert!(pc.engine.applied_of("test-game").is_none());
+}
