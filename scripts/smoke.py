@@ -124,6 +124,37 @@ def run(binary: Path) -> None:
                 assert len(status["data"]["games"]) == 2
                 outcome("pc", "up_to_date", "sync", "smoke-game")
                 assert command("pc", "history", "smoke-game")["data"]["versions"]
+                # Real binary enrollment and sync over QUIC, isolated from user LAN trust.
+                command("pc", "remote", "setup", "lan", "0", "unused")
+                pc_lan = command("pc", "remote", "lan", "status")["data"]
+                invitation = command("pc", "remote", "lan", "invite")["data"]["invitation_pin"]
+                deck_log = root / "deck-daemon.log"
+                with deck_log.open("w", encoding="utf-8") as deck_output:
+                    deck_daemon = subprocess.Popen([str(binary), "serve"], env=environments["deck"],
+                                                  stdout=deck_output, stderr=deck_output,
+                                                  creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+                    try:
+                        for _ in range(50):
+                            ready = subprocess.run([str(binary), "status"], env=environments["deck"], capture_output=True, timeout=5)
+                            if ready.returncode == 0:
+                                break
+                            time.sleep(0.1)
+                        else:
+                            raise AssertionError(deck_log.read_text(encoding="utf-8"))
+                        offer = command("deck", "remote", "lan", "pair", f"127.0.0.1:{pc_lan['port']}", invitation)["data"]["offer"]
+                        pending = command("pc", "remote", "lan", "status")["data"]["peers"]
+                        assert len(pending) == 1 and pending[0]["sas"] == offer["sas"]
+                        command("deck", "remote", "lan", "confirm", offer["peer_id"])
+                        command("pc", "remote", "lan", "confirm", pending[0]["peer"]["id"])
+                        command("pc", "remote", "setup", "fs-off")
+                        command("deck", "remote", "setup", "fs-off")
+                        save("pc", "progress over authenticated QUIC")
+                        command("pc", "sync", "smoke-game")
+                        command("deck", "sync", "smoke-game")
+                        assert (root / "deck/home/saves/slot.sav").read_text() == "progress over authenticated QUIC"
+                    finally:
+                        deck_daemon.terminate()
+                        deck_daemon.wait(timeout=5)
                 second = subprocess.run([str(binary), "serve"], env=environments["pc"],
                                         capture_output=True, timeout=5)
                 assert second.returncode != 0, "second daemon unexpectedly acquired the IPC socket"
@@ -131,7 +162,7 @@ def run(binary: Path) -> None:
                 daemon.terminate()
                 daemon.wait(timeout=5)
         print("PASS: CLI scan, two-device sync, safety backup, conflict resolution, rescan,")
-        print("      portable backup/import, Windows custom keys, isolated IPC, second-instance guard")
+        print("      portable backup/import, Windows custom keys, isolated IPC, second-instance guard, paired QUIC LAN")
 
 
 if __name__ == "__main__":

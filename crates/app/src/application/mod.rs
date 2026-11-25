@@ -18,6 +18,7 @@ mod settings;
 mod tests;
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
 struct JobDone {
+    lan: Option<savesync_core::lan::LanPayload>,
     oauth_started: Option<savesync_core::oauth::Provider>,
     config: Option<Config>,
     msg: Result<String, String>,
@@ -38,6 +39,9 @@ enum Tab {
 }
 
 pub(crate) struct SaveSyncApp {
+    lan: Option<savesync_core::lan::LanPayload>,
+    lan_address: String,
+    lan_pair_pin: String,
     oauth_pending: Option<savesync_core::oauth::Provider>,
     client: Arc<dyn DaemonClient>,
     tab: Tab,
@@ -57,6 +61,9 @@ pub(crate) struct SaveSyncApp {
 impl SaveSyncApp {
     pub(crate) fn new() -> Self {
         SaveSyncApp {
+            lan: None,
+            lan_address: String::new(),
+            lan_pair_pin: String::new(),
             oauth_pending: None,
             client: Arc::new(IpcDaemonClient),
             tab: Tab::Games,
@@ -116,6 +123,11 @@ impl SaveSyncApp {
                     } else {
                         None
                     };
+                    let lan = if let ResponsePayload::Lan(status) = &payload {
+                        Some(status.clone())
+                    } else {
+                        None
+                    };
                     let config = if let ResponsePayload::Config(response) = &payload {
                         Some(response.config.clone())
                     } else {
@@ -123,6 +135,7 @@ impl SaveSyncApp {
                     };
                     let (msg, rs, rh) = map(payload);
                     JobDone {
+                        lan,
                         oauth_started,
                         config,
                         msg: Ok(msg),
@@ -131,6 +144,7 @@ impl SaveSyncApp {
                     }
                 }
                 Err(e) => JobDone {
+                    lan: None,
                     oauth_started: None,
                     config: None,
                     msg: Err(e),
@@ -235,6 +249,15 @@ impl SaveSyncApp {
         }
     }
 
+    fn lan_action(&mut self, action: savesync_core::lan::LanAction) {
+        self.start_job("LAN…", Method::Lan { action }, |_| {
+            (
+                "Состояние LAN обновлено; для сопряжения сравните SAS на обоих устройствах".into(),
+                true,
+                false,
+            )
+        });
+    }
     fn sync_all(&mut self) {
         self.start_job(
             "Синхронизация всех игр…",
@@ -325,6 +348,9 @@ impl eframe::App for SaveSyncApp {
             self.job = None;
             if let Some(provider) = done.oauth_started {
                 self.oauth_pending = Some(provider);
+            }
+            if let Some(lan) = done.lan {
+                self.lan = Some(lan);
             }
             if let Some(config) = done.config {
                 self.form = ConfigForm::from_config(&config);

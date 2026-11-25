@@ -86,12 +86,6 @@ impl SaveSyncApp {
                         ui.add(
                             egui::TextEdit::singleline(&mut self.form.lan_port).desired_width(80.0),
                         );
-                        ui.label("PIN:");
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.form.lan_pin)
-                                .password(true)
-                                .desired_width(120.0),
-                        );
                     });
                     ui.horizontal(|ui| {
                         ui.label("Пиры (host:port, через запятую):");
@@ -100,6 +94,7 @@ impl SaveSyncApp {
                                 .desired_width(320.0),
                         );
                     });
+                    self.view_lan_pairing(ui);
                 }
             });
             ui.add_space(10.0);
@@ -164,6 +159,110 @@ impl SaveSyncApp {
             .clicked()
         {
             self.save_config();
+        }
+    }
+}
+
+impl SaveSyncApp {
+    fn view_lan_pairing(&mut self, ui: &mut egui::Ui) {
+        use savesync_core::lan::LanAction;
+        let busy = self.busy();
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(!busy, egui::Button::new("Найти устройства"))
+                .clicked()
+            {
+                self.lan_action(LanAction::Discover);
+            }
+            if ui
+                .add_enabled(!busy, egui::Button::new("Показать PIN на 2 минуты"))
+                .clicked()
+            {
+                self.lan_action(LanAction::Invite);
+            }
+            if ui
+                .add_enabled(!busy, egui::Button::new("Обновить доверие"))
+                .clicked()
+            {
+                self.lan_action(LanAction::Status);
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label("Адрес:");
+            ui.text_edit_singleline(&mut self.lan_address);
+            ui.label("PIN:");
+            ui.add(
+                egui::TextEdit::singleline(&mut self.lan_pair_pin)
+                    .password(true)
+                    .desired_width(75.0),
+            );
+            if ui
+                .add_enabled(!busy, egui::Button::new("Сопрячь"))
+                .clicked()
+            {
+                let pin = std::mem::take(&mut self.lan_pair_pin);
+                self.lan_action(LanAction::Pair {
+                    address: self.lan_address.trim().into(),
+                    pin,
+                });
+            }
+        });
+        if let Some(status) = self.lan.clone() {
+            if let Some(pin) = status.invitation_pin {
+                ui.label(format!(
+                    "PIN: {pin}. Введите на другом устройстве. Не используйте повторно."
+                ));
+                if ui
+                    .add_enabled(!busy, egui::Button::new("Закрыть приглашение"))
+                    .clicked()
+                {
+                    self.lan_action(LanAction::ClosePairing);
+                }
+            }
+            for peer in status.discovered {
+                ui.horizontal(|ui| {
+                    ui.label(format!("{} — {}", peer.name, peer.address));
+                    if ui.button("Выбрать адрес").clicked() {
+                        self.lan_address = peer.address;
+                    }
+                });
+            }
+            for entry in status.peers {
+                let id = entry.peer.id.clone();
+                if entry.confirmed {
+                    ui.horizontal(|ui| {
+                        ui.label(format!("Доверенное устройство {}", &id[..12]));
+                        if ui.add_enabled(!busy, egui::Button::new("Забыть")).clicked() {
+                            self.lan_action(LanAction::Forget { peer_id: id });
+                        }
+                    });
+                } else {
+                    ui.label(format!(
+                        "Устройство {}. SAS: {}",
+                        &id[..12],
+                        entry.sas.unwrap_or_default()
+                    ));
+                    ui.label(
+                        "Сравните SAS на обоих устройствах. Подтверждайте только при совпадении.",
+                    );
+                    ui.horizontal(|ui| {
+                        if ui
+                            .add_enabled(!busy, egui::Button::new("SAS совпадает — доверять"))
+                            .clicked()
+                        {
+                            self.lan_action(LanAction::Confirm {
+                                peer_id: id.clone(),
+                            });
+                        }
+                        if ui
+                            .add_enabled(!busy, egui::Button::new("Отклонить"))
+                            .clicked()
+                        {
+                            self.lan_action(LanAction::Forget { peer_id: id });
+                        }
+                    });
+                }
+            }
         }
     }
 }

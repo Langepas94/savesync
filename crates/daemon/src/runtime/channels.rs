@@ -41,7 +41,10 @@ impl Runtime {
             // …и каждый пир — отдельный канал.
             for peer in &lan.peers {
                 out.push(Engine::new(
-                    Box::new(LanBackend::new(peer, &lan.pin)) as Box<dyn Backend>,
+                    Box::new(LanBackend::with_identity(
+                        peer,
+                        self.state_dir.join("lan-identity"),
+                    )) as Box<dyn Backend>,
                     self.config.device_id.clone(),
                     self.state_dir.clone(),
                 ));

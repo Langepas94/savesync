@@ -17,6 +17,9 @@ pub enum Method {
     Scan,
     /// Reload installed/curated/custom manifests and rescan without restart.
     ReloadManifests,
+    Lan {
+        action: crate::lan::LanAction,
+    },
     OAuthBegin {
         provider: crate::oauth::Provider,
     },
@@ -119,6 +122,7 @@ pub struct RpcError {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum ResponsePayload {
+    Lan(crate::lan::LanPayload),
     OAuthStart(OAuthStartPayload),
     OAuthStatus(OAuthStatusPayload),
     Status(StatusPayload),

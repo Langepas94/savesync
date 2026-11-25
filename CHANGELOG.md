@@ -5,6 +5,12 @@
 
 ## [Unreleased]
 
+- Replace replayable LAN PIN hashes with QUIC/TLS 1.3, SPAKE2 enrollment,
+  exporter-bound device authentication and explicit SAS trust on both devices.
+- Add advisory mDNS discovery, short-lived rate-limited invitations, revocation,
+  persistent Ed25519 identities and CLI/UI pairing controls. See docs/LAN.md.
+
+
 - Configurable Google/Yandex native OAuth with S256 PKCE, loopback callback,
   UI login/cancel and CLI remote login/logout; no embedded application credentials.
 - OS credential references replace plaintext config tokens; migration, refresh

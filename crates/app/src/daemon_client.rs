@@ -25,6 +25,11 @@ pub(crate) fn validate_result(
     method: &Method,
     payload: ResponsePayload,
 ) -> Result<ResponsePayload, String> {
+    if let ResponsePayload::Lan(status) = &payload {
+        if let Some(error) = &status.error {
+            return Err(error.clone());
+        }
+    }
     if let ResponsePayload::OAuthStatus(status) = &payload {
         if status.state == "error" {
             return Err(status
@@ -57,6 +62,7 @@ pub(crate) fn validate_result(
         }
     }
     let valid = match (method, &payload) {
+        (Method::Lan { .. }, ResponsePayload::Lan(_)) => true,
         (Method::OAuthBegin { .. }, ResponsePayload::OAuthStart(_))
         | (
             Method::OAuthPoll { .. } | Method::OAuthCancel { .. },

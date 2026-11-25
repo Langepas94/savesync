@@ -108,6 +108,7 @@ fn cmd_via_daemon_or_direct(method: Method) -> i32 {
     let payload = match &method {
         Method::Scan => rt.scan(),
         Method::ReloadManifests => rt.reload_manifests(),
+        Method::Lan { action } => rt.lan_action(action.clone()),
         Method::OAuthBegin { provider } => rt.oauth_begin(*provider),
         Method::OAuthPoll { provider } => rt.oauth_poll(*provider),
         Method::OAuthCancel { provider } => rt.oauth_cancel(*provider),
@@ -149,6 +150,7 @@ fn print_payload(payload: &ResponsePayload) {
 
 fn payload_exit_code(payload: &ResponsePayload) -> i32 {
     match payload {
+        ResponsePayload::Lan(status) if status.error.is_some() => 1,
         ResponsePayload::OAuthStatus(status) if status.state == "error" => 1,
         ResponsePayload::Sync(sync)
             if sync.results.iter().any(|result| {
