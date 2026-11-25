@@ -46,9 +46,13 @@ def serve_once(path: Path, response: dict, captured: list) -> threading.Thread:
 
 class RpcTest(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(self.id().replace(".", "_")).with_suffix(".sock")
-        self.sock_path = Path.cwd() / self.tmp
-        self.addCleanup(lambda: self.sock_path.unlink(missing_ok=True))
+        # Путь к сокету обязан быть коротким (лимит AF_UNIX — 108 байт).
+        import tempfile
+
+        self.tmpdir = Path(tempfile.mkdtemp(prefix="ss-"))
+        self.sock_path = self.tmpdir / "t.sock"
+        self.addCleanup(self.sock_path.unlink, missing_ok=True)
+        self.addCleanup(self.tmpdir.rmdir)
         self._orig = proxy.SOCKET_ADDRESS
         proxy.SOCKET_ADDRESS = str(self.sock_path)
         self.addCleanup(setattr, proxy, "SOCKET_ADDRESS", self._orig)
