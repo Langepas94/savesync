@@ -5,8 +5,9 @@ Steam Deck (SteamOS). Аналог Steam Cloud, но: любые игры (не 
 версионирование, конфликты, бэкапы, каналы синхронизации — Яндекс.Диск /
 Google Drive и/или прямая LAN-синхронизация.
 
-**Статус:** M1 (core MVP). Только ручная синхронизация — без таймеров,
-опросов облака и автодетекта игр (автотриггеры — итерация 2).
+**Статус:** M1–M6 завершены (core, демон, десктопное приложение, Decky-плагин,
+бэкапы). Ручная синхронизация — без таймеров и автодетекта игр
+(автотриггеры — итерация 2).
 
 ## Архитектура
 
@@ -55,17 +56,23 @@ savesync-daemon status       # статус демона
 
 ### Windows
 
-1. Скачать `savesync-setup.exe` (подписанный) из Releases.
-2. Установщик кладёт демон + приложение, регистрирует автозапуск в HKCU Run
+1. Скачать архив `savesync-x86_64-pc-windows-msvc` из Releases
+   (демон + десктопное приложение). Подпись кода пока отсутствует —
+   Windows SmartScreen может показать предупреждение.
+2. Автозапуск демона — добавить в `HKCU\Software\Microsoft\Windows\
+   CurrentVersion\Run` команду `savesync-daemon serve`
    (user-context, не SYSTEM-сервис).
-3. При первом старте — экран «Подключения»: облако (OAuth в браузере) и/или
-   LAN-pairing по PIN, либо «пропустить» (локальные бэкапы).
+3. Запустить `savesync-app.exe`: экран «Подключения» — токен Яндекс.Диска
+   и/или Google Drive, LAN-pairing по PIN, либо только локальные бэкапы.
 
 ### Steam Deck (SteamOS)
 
-1. Desktop Mode → установщик `.sh`: кладёт бинарь в `~/.local/bin`,
-   регистрирует `systemctl --user enable --now savesync.service`.
-2. (Опционально) Decky Loader → плагин SaveSync: шторка в Quick Access.
+1. Desktop Mode → `packaging/install-steamos.sh`: кладёт бинарь в
+   `~/.local/bin`, регистрирует `systemctl --user enable --now
+   savesync.service` (unit — `packaging/systemd/savesync.service`).
+2. (Опционально) Decky Loader → плагин SaveSync из `decky-plugin/`:
+   шторка в Quick Access (статус, кнопка «Синхронизировать», баннер
+   конфликта; резолвер конфликтов — в десктопном приложении).
 3. Установка только в home, без `sudo steamos-readonly disable`.
 
 ### Общее

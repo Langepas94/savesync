@@ -58,10 +58,24 @@ jobs:
       # Матрица кейсов путей Win/Linux обязана прогоняться на обеих ОС.
       - run: cargo test --workspace
 
+  decky-plugin:
+    name: decky-plugin (python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # JSON-RPC прокси: тесты требуют AF_UNIX → только Linux (целевая ОС).
+      - run: python -m unittest discover -s tests -v
+        working-directory: decky-plugin
+      # Структурная проверка манифеста плагина.
+      - run: python -c "import json; m=json.load(open('decky-plugin/plugin.json')); assert m['name'] and 'publish' in m"
+
   release:
     name: release artifacts
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [fmt, clippy, test]
+    needs: [fmt, clippy, test, decky-plugin]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false

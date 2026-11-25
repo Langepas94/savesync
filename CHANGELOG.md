@@ -112,3 +112,14 @@
 - Демон: runtime-методы `history`, `restore`, `backup_game`,
   `get_config`, `save_config` (сохраняет device_id/name), IPC-диспетчер
   покрывает все методы приложения.
+- `decky-plugin/` — плагин Decky Loader (M5): Python-прокси `main.py`
+  к unix-сокету демона (abstract namespace, тот же JSON-RPC), React-шторка
+  Quick Access 360 px (`index.tsx`): статус демона, кнопка
+  «Синхронизировать», баннер конфликта (резолвер — в приложении), список
+  игр; `plugin.json`/`package.json`/rollup-сборка. Тесты прокси
+  (unittest, фейковый unix-сервер) — в CI на Ubuntu.
+- `packaging/systemd/savesync.service` — systemd user unit демона
+  (Restart=on-failure, after network-online).
+- `packaging/install-steamos.sh` — установка на SteamOS в home-каталог
+  (бинарь в `~/.local/bin`, enable --now сервиса), без sudo и без
+  `steamos-readonly disable`.

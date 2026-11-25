@@ -1,0 +1,11 @@
+{
+  "name": "SaveSync",
+  "author": "Langepas94",
+  "flags": [],
+  "api_version": 1,
+  "publish": {
+    "tags": ["saves", "sync", "cloud"],
+    "description": "Синхронизация сохранений между Steam Deck и ПК: статус и ручной sync из Quick Access.",
+    "image": ""
+  }
+}
