@@ -1,9 +1,9 @@
 //! Background update checks/downloads keep IPC polling and egui responsive.
 use eframe::egui;
-use savesync_core::updates::{self, Release};
+use savesync_core::updates::{self, Release, ReleaseCheck};
 use std::sync::mpsc;
 enum Event {
-    Checked(Result<Option<Release>, String>),
+    Checked(Result<ReleaseCheck, String>),
     Installed(Result<(), String>),
 }
 #[derive(Default)]
@@ -12,14 +12,17 @@ pub(super) struct Updates {
     job: Option<mpsc::Receiver<Event>>,
     message: String,
     failed: bool,
+    last_check: Option<std::time::Instant>,
+    github_token: String,
 }
 impl Updates {
     fn check(&mut self) {
+        self.last_check = Some(std::time::Instant::now());
         self.begin_check(|| updates::check().map_err(|error| error.to_string()));
     }
     fn begin_check(
         &mut self,
-        work: impl FnOnce() -> Result<Option<Release>, String> + Send + 'static,
+        work: impl FnOnce() -> Result<ReleaseCheck, String> + Send + 'static,
     ) {
         let (sender, receiver) = mpsc::channel();
         self.job = Some(receiver);
@@ -30,6 +33,13 @@ impl Updates {
         });
     }
     pub fn poll(&mut self) {
+        if self.job.is_none()
+            && self
+                .last_check
+                .is_none_or(|last| last.elapsed() >= std::time::Duration::from_secs(86400))
+        {
+            self.check();
+        }
         let event = match self.job.as_ref().map(|receiver| receiver.try_recv()) {
             Some(Ok(event)) => event,
             Some(Err(mpsc::TryRecvError::Disconnected)) => {
@@ -39,20 +49,32 @@ impl Updates {
         };
         self.job = None;
         match event {
-            Event::Checked(Ok(release)) => {
-                self.message = release
-                    .as_ref()
-                    .map(|release| format!("Доступна версия {}", release.version))
-                    .unwrap_or_else(|| "Установлена актуальная версия".into());
-                self.release = release;
+            Event::Checked(Ok(result)) => {
+                self.release = None;
+                self.message = match result {
+                    ReleaseCheck::NoPublishedRelease => {
+                        "В GitHub Releases пока нет стабильных релизов SaveSync.".into()
+                    }
+                    ReleaseCheck::UpToDate => "Установлена актуальная версия".into(),
+                    ReleaseCheck::Available(release) => {
+                        let message = format!("Доступна версия {}", release.version);
+                        self.release = Some(release);
+                        message
+                    }
+                };
                 self.failed = false;
             }
             Event::Installed(Ok(())) => {
                 self.message =
-                    "Подписанный установщик запущен; он дождётся завершения синхронизации".into();
+                    "Обновление запущено; программа дождётся завершения синхронизации".into();
                 self.failed = false;
             }
-            Event::Checked(Err(error)) | Event::Installed(Err(error)) => {
+            Event::Checked(Err(error)) => {
+                self.release = None;
+                self.message = error;
+                self.failed = true;
+            }
+            Event::Installed(Err(error)) => {
                 self.message = error;
                 self.failed = true;
             }
@@ -78,7 +100,10 @@ impl Updates {
             ui.spinner();
         }
         if ui
-            .add_enabled(self.job.is_none(), egui::Button::new("Проверить Releases"))
+            .add_enabled(
+                self.job.is_none(),
+                egui::Button::new("Проверить обновления"),
+            )
             .clicked()
         {
             self.check();
@@ -94,9 +119,9 @@ impl Updates {
             );
         }
         if let Some(release) = self.release.clone() {
-            if cfg!(windows) {
+            if cfg!(any(windows, target_os = "linux")) {
                 if !updates::automatic_updates_configured() {
-                    ui.label("В этой сборке не настроен доверенный издатель обновлений. Установите подписанный релиз вручную.");
+                    ui.label("В этой сборке не настроен доверенный ключ обновлений.");
                 }
                 if ui
                     .add_enabled(
@@ -108,12 +133,51 @@ impl Updates {
                     self.install();
                 }
             } else {
-                ui.label("SteamOS: обновите пакет через install-steamos.sh в Desktop Mode; сервис будет перезапущен.");
+                ui.label("Автоматическое обновление на этой платформе недоступно.");
             }
             if ui.button("Открыть страницу релиза").clicked() {
                 let _ = webbrowser::open(&release.page_url);
             }
         }
+        ui.collapsing("Доступ к приватным релизам", |ui| {
+            ui.label("Токен GitHub с правом Contents: Read-only для репозитория SaveSync.");
+            ui.hyperlink_to(
+                "Создать токен GitHub",
+                "https://github.com/settings/personal-access-tokens/new",
+            );
+            ui.add(
+                egui::TextEdit::singleline(&mut self.github_token)
+                    .password(true)
+                    .hint_text("Токен GitHub"),
+            );
+            ui.horizontal(|ui| {
+                let idle = self.job.is_none();
+                if ui
+                    .add_enabled(
+                        idle && !self.github_token.trim().is_empty(),
+                        egui::Button::new("Сохранить токен"),
+                    )
+                    .clicked()
+                {
+                    let token = std::mem::take(&mut self.github_token);
+                    self.begin_check(move || {
+                        updates::save_github_token(token)
+                            .and_then(|()| updates::check())
+                            .map_err(|error| error.to_string())
+                    });
+                }
+                if ui
+                    .add_enabled(idle, egui::Button::new("Удалить сохранённый токен"))
+                    .clicked()
+                {
+                    self.begin_check(|| {
+                        updates::remove_github_token()
+                            .and_then(|()| updates::check())
+                            .map_err(|error| error.to_string())
+                    });
+                }
+            });
+        });
     }
 }
 #[cfg(test)]

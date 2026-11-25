@@ -30,4 +30,7 @@ printf '%s\n' "${daemon_version##* }" > "$package/VERSION"
 tar -czf "$output/savesync-steamos.tar.gz.tmp" -C "$stage" savesync-steamos
 mv -f -- "$output/savesync-steamos.tar.gz.tmp" "$output/savesync-steamos.tar.gz"
 (cd -- "$output" && sha256sum savesync-steamos.tar.gz > savesync-steamos.tar.gz.sha256)
+cat "$repo/packaging/steamos-installer-header.sh" "$output/savesync-steamos.tar.gz" > "$output/SaveSync-SteamDeck.run"
+chmod 0755 "$output/SaveSync-SteamDeck.run"
+(cd -- "$output" && sha256sum SaveSync-SteamDeck.run > SaveSync-SteamDeck.run.sha256)
 echo "Built $output/savesync-steamos.tar.gz"
