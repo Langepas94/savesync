@@ -277,7 +277,10 @@ fn discovers_ufs_from_secondary_library_and_pulls_without_local_saves() {
             .unwrap(),
         "from-pc"
     );
-    assert!(deck.roots.steam_libraries.contains(&secondary));
+    assert!(deck
+        .roots
+        .steam_libraries
+        .contains(&savesync_core::paths::canonical_path(&secondary)));
 }
 
 #[test]
