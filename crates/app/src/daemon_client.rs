@@ -69,7 +69,10 @@ pub(crate) fn validate_result(
             ResponsePayload::OAuthStatus(_),
         )
         | (Method::Status, ResponsePayload::Status(_))
-        | (Method::Scan | Method::ReloadManifests, ResponsePayload::Scan(_))
+        | (
+            Method::Scan | Method::ReloadManifests | Method::SetGameHidden { .. },
+            ResponsePayload::Scan(_),
+        )
         | (Method::History { .. }, ResponsePayload::History(_))
         | (Method::Backup { .. }, ResponsePayload::Backup(_))
         | (Method::GetConfig | Method::SaveConfig { .. }, ResponsePayload::Config(_)) => true,
@@ -118,6 +121,18 @@ mod tests {
                     .contains(outcome));
             }
         }
+    }
+    #[test]
+    fn hiding_game_accepts_scan_response() {
+        let method = Method::SetGameHidden {
+            game_key: "game".into(),
+            hidden: true,
+        };
+        let payload = ResponsePayload::Scan(savesync_core::ipc::ScanPayload {
+            found: 0,
+            games: vec![],
+        });
+        assert!(validate_result(&method, payload).is_ok());
     }
     #[test]
     fn empty_restore_and_wrong_payload_are_rejected() {

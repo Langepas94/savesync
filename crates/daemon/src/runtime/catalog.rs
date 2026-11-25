@@ -15,6 +15,47 @@ impl Runtime {
             }),
         }
     }
+    pub fn set_game_hidden(&mut self, game_key: &str, hidden: bool) -> ResponsePayload {
+        let mut games = self.hidden_games.clone();
+        if hidden {
+            let Some(game) = self.last_scan.iter().find(|g| g.game_key == game_key) else {
+                return ResponsePayload::Sync(SyncPayload {
+                    results: vec![SyncResult {
+                        game_key: game_key.into(),
+                        outcome: "error".into(),
+                        detail: Some("Игра не найдена".into()),
+                    }],
+                });
+            };
+            games.insert(game_key.into(), game.display_name.clone());
+        } else {
+            games.remove(game_key);
+        }
+        let result = (|| -> io::Result<()> {
+            std::fs::create_dir_all(&self.state_dir)?;
+            let path = self.state_dir.join("hidden-games.json");
+            let tmp = self.state_dir.join("hidden-games.json.tmp");
+            std::fs::write(
+                &tmp,
+                serde_json::to_vec_pretty(&games).map_err(io::Error::other)?,
+            )?;
+            std::fs::rename(&tmp, &path)?;
+            Ok(())
+        })();
+        match result {
+            Ok(()) => {
+                self.hidden_games = games;
+                self.scan()
+            }
+            Err(e) => ResponsePayload::Sync(SyncPayload {
+                results: vec![SyncResult {
+                    game_key: game_key.into(),
+                    outcome: "error".into(),
+                    detail: Some(e.to_string()),
+                }],
+            }),
+        }
+    }
     pub(super) fn refresh_catalog(&mut self) {
         let (apps, libraries, diagnostics) = savesync_core::steam::discovery::discover(
             &mut self.manifests,
@@ -41,6 +82,8 @@ impl Runtime {
             known.extend(index.games.into_keys());
         }
         self.last_scan = scanner::scan_catalog(&self.manifests, self.platform, &self.roots, &known);
+        self.last_scan
+            .retain(|g| !self.hidden_games.contains_key(&g.game_key));
     }
     /// Пересканировать систему. Возвращает найденные игры.
     pub fn scan(&mut self) -> ResponsePayload {
@@ -92,6 +135,16 @@ impl Runtime {
             device_id: self.config.device_id.clone(),
             device_name: self.config.device_name.clone(),
             games,
+            hidden_games: self
+                .hidden_games
+                .iter()
+                .map(|(key, name)| GameStatus {
+                    game_key: key.clone(),
+                    display_name: name.clone(),
+                    versions: 0,
+                    state: "hidden".into(),
+                })
+                .collect(),
         })
     }
 }

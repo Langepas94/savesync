@@ -48,6 +48,7 @@ impl World {
             },
             state_dir: self.dir.join(name).join("state"),
             last_scan: Vec::new(),
+            hidden_games: Default::default(),
             lan_server: None,
             serving: false,
             oauth_jobs: Default::default(),
@@ -422,4 +423,31 @@ fn inaccessible_cloud_does_not_disable_filesystem_channel() {
             .as_deref()
             .unwrap_or("")
             .contains("[google-drive]")));
+}
+
+#[test]
+fn hidden_game_stays_excluded_until_restored() {
+    let world = World::new("hidden-game");
+    let mut rt = world.device("pc");
+    rt.scan();
+    assert!(matches!(
+        rt.set_game_hidden("test-game", true),
+        ResponsePayload::Scan(_)
+    ));
+    assert!(rt.last_scan.is_empty());
+    assert!(sync_results(rt.sync(None)).is_empty());
+    assert_eq!(world.save_of("pc"), "save of pc");
+    let saved: std::collections::BTreeMap<String, String> =
+        serde_json::from_slice(&std::fs::read(rt.state_dir.join("hidden-games.json")).unwrap())
+            .unwrap();
+    assert_eq!(saved.get("test-game").unwrap(), "Test Game");
+    let mut restarted = world.device("pc");
+    restarted.hidden_games = saved;
+    restarted.scan();
+    assert!(restarted.last_scan.is_empty());
+    assert!(matches!(
+        restarted.set_game_hidden("test-game", false),
+        ResponsePayload::Scan(_)
+    ));
+    assert_eq!(restarted.last_scan.len(), 1);
 }

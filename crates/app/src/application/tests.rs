@@ -112,6 +112,7 @@ fn game_view_renders_with_an_egui_context_without_a_window() {
     let mut app = SaveSyncApp::new();
     app.daemon_ok = true;
     app.status = Some(StatusPayload {
+        hidden_games: vec![],
         busy: false,
         daemon_version: "test".into(),
         device_id: "qa".into(),

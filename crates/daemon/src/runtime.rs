@@ -24,6 +24,7 @@ pub struct Runtime {
     /// Локальное состояние движка (индекс, tmp, бэкапы).
     pub state_dir: PathBuf,
     pub last_scan: Vec<FoundGame>,
+    pub hidden_games: std::collections::BTreeMap<String, String>,
     pub lan_server: Option<savesync_core::lan::LanServer>,
     pub serving: bool,
     pub oauth_jobs:
@@ -69,6 +70,11 @@ impl Runtime {
         }
         let platform = Platform::current();
         let roots = Roots::detect(platform);
+        let hidden_games = match std::fs::read(state_dir.join("hidden-games.json")) {
+            Ok(bytes) => serde_json::from_slice(&bytes).map_err(io::Error::other)?,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Default::default(),
+            Err(e) => return Err(e),
+        };
         let mut runtime = Runtime {
             shutdown_requested: false,
             config,
@@ -77,6 +83,7 @@ impl Runtime {
             roots,
             state_dir,
             last_scan: Vec::new(),
+            hidden_games,
             lan_server: None,
             serving: false,
             oauth_jobs: Default::default(),

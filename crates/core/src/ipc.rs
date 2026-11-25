@@ -21,6 +21,10 @@ pub enum Method {
     Scan,
     /// Reload installed/curated/custom manifests and rescan without restart.
     ReloadManifests,
+    SetGameHidden {
+        game_key: String,
+        hidden: bool,
+    },
     Lan {
         action: crate::lan::LanAction,
     },
@@ -188,6 +192,8 @@ pub struct StatusPayload {
     pub device_id: String,
     pub device_name: String,
     pub games: Vec<GameStatus>,
+    #[serde(default)]
+    pub hidden_games: Vec<GameStatus>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

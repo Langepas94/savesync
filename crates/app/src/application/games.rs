@@ -99,6 +99,7 @@ impl SaveSyncApp {
             ui.label(RichText::new("Нажмите «Обновить» для поиска или «Добавить игру», чтобы указать сохранения вручную.").color(DIM));
         }
 
+        let mut hide_one = None;
         let mut sync_one = None;
         let mut select_one = None;
         egui::ScrollArea::both()
@@ -124,6 +125,9 @@ impl SaveSyncApp {
                             ui.with_layout(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
+                                    if ui.add_enabled(!self.busy(), egui::Button::new("Удалить")).on_hover_text("Убрать из списка и остановить синхронизацию на этом устройстве").clicked() {
+                                        hide_one = Some(g.game_key.clone());
+                                    }
                                     if ui
                                         .add_enabled(!self.busy(), egui::Button::new("Синк"))
                                         .clicked()
@@ -155,6 +159,38 @@ impl SaveSyncApp {
                 }
             });
 
+        if let Some(key) = hide_one {
+            if self.selected.as_deref() == Some(&key) {
+                self.selected = None;
+                self.history = None;
+            }
+            self.set_game_hidden(key, true);
+        }
+        let hidden = self
+            .status
+            .as_ref()
+            .map(|s| s.hidden_games.clone())
+            .unwrap_or_default();
+        let mut restore = None;
+        if !hidden.is_empty() {
+            ui.collapsing("Удалённые из списка", |ui| {
+                ui.small("Сохранения и история остаются на месте.");
+                for game in hidden {
+                    ui.horizontal(|ui| {
+                        ui.label(&game.display_name);
+                        if ui
+                            .add_enabled(!self.busy(), egui::Button::new("Вернуть"))
+                            .clicked()
+                        {
+                            restore = Some(game.game_key);
+                        }
+                    });
+                }
+            });
+        }
+        if let Some(key) = restore {
+            self.set_game_hidden(key, false);
+        }
         if let Some(key) = sync_one {
             self.sync_game(&key);
         }
@@ -173,6 +209,38 @@ impl SaveSyncApp {
 
         ui.separator();
         self.view_detail(ui);
+    }
+
+    fn set_game_hidden(&mut self, game_key: String, hidden: bool) {
+        self.start_job(
+            "Обновление списка игр…",
+            Method::SetGameHidden { game_key, hidden },
+            move |payload| match payload {
+                ResponsePayload::Scan(_) => (
+                    if hidden {
+                        "Игра удалена из списка"
+                    } else {
+                        "Игра возвращена в список"
+                    }
+                    .into(),
+                    true,
+                    false,
+                ),
+                ResponsePayload::Sync(result) => (
+                    format!(
+                        "Ошибка: {}",
+                        result
+                            .results
+                            .first()
+                            .and_then(|r| r.detail.as_deref())
+                            .unwrap_or("не удалось изменить список")
+                    ),
+                    true,
+                    false,
+                ),
+                _ => ("Неожиданный ответ демона".into(), true, false),
+            },
+        );
     }
 
     fn view_add_game(&mut self, ui: &mut egui::Ui) {
