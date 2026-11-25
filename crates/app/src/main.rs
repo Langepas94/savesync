@@ -9,6 +9,8 @@ mod theme;
 #[cfg(windows)]
 mod tray;
 use eframe::egui;
+use std::sync::Arc;
+
 fn main() -> eframe::Result<()> {
     if std::env::args().any(|argument| argument == "--version") {
         println!("savesync-app {}", env!("CARGO_PKG_VERSION"));
@@ -31,8 +33,13 @@ fn main() -> eframe::Result<()> {
         .err()
         .map(|error| error.to_string());
     let minimized = std::env::args().any(|argument| argument == "--tray");
+    let icon = Arc::new(
+        eframe::icon_data::from_png_bytes(include_bytes!("../assets/savesync.png"))
+            .expect("bundled SaveSync icon must be valid"),
+    );
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
+            .with_icon(Arc::clone(&icon))
             .with_inner_size([980.0, 660.0])
             .with_min_inner_size([720.0, 480.0]),
         ..Default::default()
@@ -40,10 +47,10 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "SaveSync",
         options,
-        Box::new(|cc| {
+        Box::new(move |cc| {
             theme::apply_theme(&cc.egui_ctx);
             let mut app = application::SaveSyncApp::new();
-            app.initialize_desktop(&cc.egui_ctx, minimized, startup_error);
+            app.initialize_desktop(&cc.egui_ctx, minimized, startup_error, &icon);
             Ok(Box::new(app))
         }),
     )

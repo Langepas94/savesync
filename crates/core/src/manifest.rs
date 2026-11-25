@@ -168,6 +168,25 @@ impl Manifest {
         serde_yaml::to_string(self)
     }
 
+    /// Publish a new local rule without replacing an existing rule with the same slug.
+    pub fn save_new_custom(&self, directory: &std::path::Path) -> std::io::Result<()> {
+        use std::io::{self, Write};
+
+        let slug = self
+            .slug
+            .strip_prefix("custom:")
+            .filter(|slug| crate::game_key::is_valid_slug(slug))
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid custom slug"))?;
+        let yaml = self.to_yaml().map_err(io::Error::other)?;
+        std::fs::create_dir_all(directory)?;
+        let mut file = tempfile::NamedTempFile::new_in(directory)?;
+        file.write_all(yaml.as_bytes())?;
+        file.as_file().sync_all()?;
+        file.persist_noclobber(directory.join(format!("{slug}.yaml")))
+            .map_err(|error| error.error)?;
+        Ok(())
+    }
+
     /// Валидация записи (правила schema §6): версия, slug, причина для warn/blocked.
     pub fn validate(&self) -> Vec<String> {
         let mut errors = Vec::new();
@@ -438,5 +457,40 @@ paths:
             }],
         )
         .is_err());
+    }
+
+    #[test]
+    fn new_custom_rule_scans_literal_paths_without_overwriting_duplicates() {
+        let dir = tempfile::tempdir().unwrap();
+        let saves = dir.path().join("Save [Profile]");
+        std::fs::create_dir(&saves).unwrap();
+        let save = saves.join("slot.sav");
+        std::fs::write(&save, b"save").unwrap();
+        let manifest = Manifest::custom(
+            "My Game",
+            vec![PathRule {
+                location: None,
+                pattern: crate::paths::literal_save_pattern(&saves),
+                os: Os::Any,
+                tags: vec!["save".into()],
+            }],
+        )
+        .unwrap();
+        let custom = dir.path().join("custom");
+        manifest.save_new_custom(&custom).unwrap();
+        let mut duplicate = manifest.clone();
+        duplicate.paths[0].pattern = "<documents>/different".into();
+        assert_eq!(
+            duplicate.save_new_custom(&custom).unwrap_err().kind(),
+            std::io::ErrorKind::AlreadyExists
+        );
+        let (db, errors) = load_manifest_tree(&custom);
+        assert!(errors.is_empty());
+        let games = crate::scanner::scan(&db, Platform::current(), &Default::default());
+        assert_eq!(games.len(), 1);
+        assert_eq!(
+            games[0].locations[0].hits,
+            [crate::paths::canonical_path(&save)]
+        );
     }
 }
