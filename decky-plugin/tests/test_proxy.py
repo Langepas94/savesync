@@ -107,6 +107,28 @@ class RpcTest(unittest.TestCase):
         self.assertFalse(result["daemon_ok"])
         self.assertIn("error", result)
 
+    def test_lan_pairing_action_is_forwarded(self):
+        import asyncio
+        captured = []
+        serve_once(self.sock_path, {"id": 1, "result": {"type": "lan", "data": {"peers": []}}}, captured)
+        result = asyncio.run(proxy.Plugin().lan_action({"action": "confirm", "peer_id": "test-peer"}))
+        self.assertEqual(result, {"peers": []})
+        self.assertEqual(captured[0]["method"], "lan")
+        self.assertEqual(captured[0]["params"], {"action": {"action": "confirm", "peer_id": "test-peer"}})
+
+    def test_lan_semantic_error_is_not_success(self):
+        import asyncio
+        serve_once(self.sock_path, {"id": 1, "result": {"type": "lan", "data": {"error": "pairing expired"}}}, [])
+        with self.assertRaisesRegex(RuntimeError, "pairing expired"):
+            asyncio.run(proxy.Plugin().lan_action({"action": "status"}))
+
+    def test_peer_uid_policy_rejects_other_users(self):
+        self.assertTrue(proxy._allowed_peer_uid(1000, 1000))
+        self.assertTrue(proxy._allowed_peer_uid(1000, 0))
+        self.assertFalse(proxy._allowed_peer_uid(1000, 1001))
+        self.assertTrue(proxy._allowed_peer_uid(0, 1000, 1000))
+        self.assertFalse(proxy._allowed_peer_uid(0, 1001, 1000))
+
 
 if __name__ == "__main__":
     unittest.main()

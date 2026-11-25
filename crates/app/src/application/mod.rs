@@ -19,6 +19,7 @@ mod tests;
 mod updates;
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
 struct JobDone {
+    history: Option<HistoryPayload>,
     lan: Option<savesync_core::lan::LanPayload>,
     oauth_started: Option<savesync_core::oauth::Provider>,
     config: Option<Config>,
@@ -40,6 +41,12 @@ enum Tab {
 }
 
 pub(crate) struct SaveSyncApp {
+    oauth_poll: Option<
+        mpsc::Receiver<(
+            savesync_core::oauth::Provider,
+            Result<ResponsePayload, String>,
+        )>,
+    >,
     updates: updates::Updates,
     #[cfg(windows)]
     tray: Option<crate::tray::Tray>,
@@ -67,6 +74,7 @@ pub(crate) struct SaveSyncApp {
 impl SaveSyncApp {
     pub(crate) fn new() -> Self {
         SaveSyncApp {
+            oauth_poll: None,
             updates: updates::Updates::default(),
             #[cfg(windows)]
             tray: None,
@@ -188,6 +196,11 @@ impl SaveSyncApp {
                     } else {
                         None
                     };
+                    let history = if let ResponsePayload::History(history) = &payload {
+                        Some(history.clone())
+                    } else {
+                        None
+                    };
                     let lan = if let ResponsePayload::Lan(status) = &payload {
                         Some(status.clone())
                     } else {
@@ -200,6 +213,7 @@ impl SaveSyncApp {
                     };
                     let (msg, rs, rh) = map(payload);
                     JobDone {
+                        history,
                         lan,
                         oauth_started,
                         config,
@@ -209,6 +223,7 @@ impl SaveSyncApp {
                     }
                 }
                 Err(e) => JobDone {
+                    history: None,
                     lan: None,
                     oauth_started: None,
                     config: None,
@@ -243,27 +258,28 @@ impl SaveSyncApp {
     }
 
     fn load_history(&mut self, game_key: &str) {
-        match self.client.request(Method::History {
-            game_key: game_key.to_string(),
-        }) {
-            Ok(ResponsePayload::History(h)) => self.history = Some(h),
-            Ok(_) => {}
-            Err(e) => {
-                self.history = None;
-                self.set_notice(format!("история: {e}"), true);
-            }
+        if self.job.is_some() {
+            return;
         }
+        self.history = None;
+        self.start_job(
+            "Загрузка истории…",
+            Method::History {
+                game_key: game_key.into(),
+            },
+            |_| (String::new(), false, false),
+        );
     }
 
     fn ensure_config(&mut self) {
-        if self.cfg.is_some() || !self.daemon_ok {
+        if self.cfg.is_some() || !self.daemon_ok || self.busy() {
             return;
         }
-        if let Ok(ResponsePayload::Config(p)) = self.client.request(Method::GetConfig) {
-            self.form = ConfigForm::from_config(&p.config);
-            self.form_loaded = true;
-            self.cfg = Some(p.config);
-        }
+        self.start_job(
+            "Загрузка настроек…",
+            Method::GetConfig,
+            |_| (String::new(), false, false),
+        );
     }
 
     fn refresh_games(&mut self) {
@@ -278,6 +294,7 @@ impl SaveSyncApp {
     }
 
     fn begin_oauth(&mut self, provider: savesync_core::oauth::Provider) {
+        self.oauth_poll = None;
         self.start_job(
             "Подключение облака…",
             Method::OAuthBegin { provider },
@@ -285,6 +302,7 @@ impl SaveSyncApp {
         );
     }
     fn cancel_oauth(&mut self, provider: savesync_core::oauth::Provider) {
+        self.oauth_poll = None;
         self.start_job(
             "Отмена входа…",
             Method::OAuthCancel { provider },
@@ -293,10 +311,41 @@ impl SaveSyncApp {
         self.oauth_pending = None;
     }
     fn poll_oauth(&mut self) {
+        if self.oauth_poll.is_some() || self.status.as_ref().is_some_and(|status| status.busy) {
+            return;
+        }
         let Some(provider) = self.oauth_pending else {
             return;
         };
-        match self.client.request(Method::OAuthPoll { provider }) {
+        let (sender, receiver) = mpsc::channel();
+        let client = self.client.clone();
+        self.oauth_poll = Some(receiver);
+        std::thread::spawn(move || {
+            let result = client.request(Method::OAuthPoll { provider });
+            let _ = sender.send((provider, result));
+        });
+    }
+    fn collect_oauth_poll(&mut self) {
+        let result = match self.oauth_poll.as_ref().map(|receiver| receiver.try_recv()) {
+            Some(Ok(result)) => result,
+            Some(Err(mpsc::TryRecvError::Disconnected)) => {
+                self.oauth_poll = None;
+                return;
+            }
+            _ => return,
+        };
+        self.oauth_poll = None;
+        self.apply_oauth_poll(result.0, result.1);
+    }
+    fn apply_oauth_poll(
+        &mut self,
+        provider: savesync_core::oauth::Provider,
+        result: Result<ResponsePayload, String>,
+    ) {
+        if self.oauth_pending != Some(provider) {
+            return;
+        }
+        match result {
             Ok(ResponsePayload::OAuthStatus(status)) if status.state == "connected" => {
                 self.oauth_pending = None;
                 self.cfg = None;
@@ -304,7 +353,7 @@ impl SaveSyncApp {
                 self.set_notice("Облако подключено".into(), false);
             }
             Ok(ResponsePayload::OAuthStatus(status)) if status.state == "idle" => {
-                self.oauth_pending = None;
+                self.oauth_pending = None
             }
             Err(error) => {
                 self.oauth_pending = None;
@@ -386,7 +435,7 @@ impl SaveSyncApp {
     }
 
     fn busy(&self) -> bool {
-        self.job.is_some()
+        self.job.is_some() || self.status.as_ref().is_some_and(|status| status.busy)
     }
 }
 
@@ -401,6 +450,7 @@ impl eframe::App for SaveSyncApp {
         }
         #[cfg(windows)]
         self.poll_tray(ctx);
+        self.collect_oauth_poll();
         self.updates.poll();
         ctx.request_repaint_after(Duration::from_millis(500));
 
@@ -424,6 +474,9 @@ impl eframe::App for SaveSyncApp {
             if let Some(provider) = done.oauth_started {
                 self.oauth_pending = Some(provider);
             }
+            if let Some(history) = done.history {
+                self.history = Some(history);
+            }
             if let Some(lan) = done.lan {
                 self.lan = Some(lan);
             }
@@ -433,7 +486,8 @@ impl eframe::App for SaveSyncApp {
                 self.form_loaded = true;
             }
             match done.msg {
-                Ok(m) => self.set_notice(m, false),
+                Ok(m) if !m.is_empty() => self.set_notice(m, false),
+                Ok(_) => (),
                 Err(e) => self.set_notice(e, true),
             }
             if done.refresh_status {
@@ -457,7 +511,12 @@ impl eframe::App for SaveSyncApp {
                 ui.selectable_value(&mut self.tab, Tab::Settings, "Настройки");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if self.daemon_ok {
-                        ui.label(RichText::new("● демон работает").color(OK).small());
+                        let label = if self.status.as_ref().is_some_and(|status| status.busy) {
+                            "● выполняется операция"
+                        } else {
+                            "● демон работает"
+                        };
+                        ui.label(RichText::new(label).color(OK).small());
                     } else {
                         ui.label(RichText::new("● демон не запущен").color(WARN).small());
                     }
@@ -494,8 +553,11 @@ impl eframe::App for SaveSyncApp {
                 ui.vertical_centered(|ui| {
                     ui.label(RichText::new("Демон не запущен").size(18.0).color(WARN));
                     ui.add_space(8.0);
-                    ui.label("Запустите в терминале:");
-                    ui.code("savesync-daemon serve");
+                    if ui.button("Запустить SaveSync").clicked() {
+                        if let Err(error) = crate::lifecycle::start_daemon() {
+                            self.set_notice(error.to_string(), true);
+                        }
+                    }
                     ui.add_space(4.0);
                     ui.label(RichText::new("Приложение подключится автоматически.").color(DIM));
                 });

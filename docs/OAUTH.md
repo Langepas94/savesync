@@ -62,8 +62,8 @@ CLI печатает URL: откройте его на **том же компь�
 
 Windows использует Credential Manager, Linux — Secret Service в пользовательской
 D-Bus сессии (например, GNOME Keyring/KWallet с Secret Service). Нужны доступный
-и разблокированный store. SteamOS Gaming Mode без него потребует предварительной
-настройки Secret Service; plaintext fallback не включён. Ошибка хранилища
+и разблокированный store. SteamOS Gaming Mode без него использует предварительно настроенный Secret Service
+или явный encrypted fallback ниже. Plaintext fallback не включён. Ошибка хранилища
 показывается явно, токен не записывается в `config.json`.
 
 Config/IPC содержат `keyring:<opaque-id>`. При первом чтении старого config
@@ -79,3 +79,31 @@ Refresh выполняется перед истечением и один ра�
 
 Проверено mock HTTP и fake vault тестами, без управления компьютером.
 Живой вход требует ваших зарегистрированных приложений и пока не заявлен.
+
+
+## Шифрованный fallback без Secret Service
+
+Если Gaming Mode не предоставляет разблокированный Secret Service, перед первым
+входом выберите encrypted file vault: задайте **`SAVESYNC_VAULT_PASSPHRASE`**
+в окружении приложения и демона. Минимум 12 символов; используйте длинную случайную
+фразу. Приложение не сохраняет пароль на диск. Не добавляйте его в config,
+`.env`, Git или unit file. Пароль нужен после перезапуска сессии/машины.
+
+Для systemd user service можно в Desktop Mode безопасно ввести пароль через
+`read -rs SAVESYNC_VAULT_PASSPHRASE`, экспортировать переменную, выполнить
+`systemctl --user import-environment SAVESYNC_VAULT_PASSPHRASE` и перезапустить
+`savesync.service`. Запускайте desktop app из окружения с той же переменной.
+Команда с самим паролем не нужна и не должна попадать в историю shell.
+
+Vault хранится в `<profile>/credentials.encrypted.json`: Argon2id (19 MiB,
+2 прохода, 1 lane), случайные salt и 192-bit nonce, XChaCha20-Poly1305 с AAD.
+Записи меняются под file lock через temp/flush/rename; на Unix файл создаётся
+с mode 0600. Неверный пароль/повреждение отклоняется до записи и не заменяет
+рабочий vault. Расшифрованный буфер и ключ очищаются при освобождении.
+
+Выбор file vault явный: при наличии переменной используется этот store;
+без неё — системный keyring. Выберите режим до OAuth. Existing references
+не мигрируют между двумя stores автоматически: при смене режима войдите заново.
+Храните резервную копию зашифрованного файла и пароль отдельно. Потерянный пароль
+не восстанавливается программой; доступ к облаку можно подключить новым OAuth.
+Это шифрованный fallback, plaintext fallback не предусмотрен.

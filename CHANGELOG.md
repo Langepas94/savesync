@@ -5,6 +5,20 @@
 
 ## [Unreleased]
 
+- Add Decky QAM LAN invitation, discovery, pairing and explicit SAS confirmation.
+- Authenticate both IPC endpoints by UID/Windows token SID before sending config
+  or PINs; allow privileged Decky on Linux. Keep status responsive during sync.
+- Load desktop config/history in background jobs and preserve committed credential
+  fields after ambiguous post-commit storage failures.
+
+
+- Add an explicit Argon2id/XChaCha20-Poly1305 credential vault for sessions without
+  Secret Service; the passphrase is never persisted by the app.
+- Stage SteamOS app/daemon updates, stop active work before replacement, wait for
+  IPC readiness and restore the previous package on failure. Preserve the profile.
+- Add isolated POSIX installer regression and a read-only physical Deck check script.
+
+
 - Add per-user Windows installer, HKCU autostart, single-instance desktop/tray,
   background release checks and verified signed installer updates.
 - Stop the daemon after active work before upgrade/uninstall; disconnected stop

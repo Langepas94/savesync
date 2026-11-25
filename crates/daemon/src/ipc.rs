@@ -4,7 +4,7 @@
 //! cleanup). Одно соединение = поток; запросы newline-delimited.
 
 use std::io::{BufRead, BufReader, Write};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock, TryLockError};
 
 use interprocess::local_socket::{prelude::*, GenericNamespaced, ListenerOptions, Name};
 use savesync_core::ipc::{Method, Request, Response};
@@ -23,13 +23,20 @@ pub fn serve(runtime: Arc<Mutex<Runtime>>, name: &str) -> std::io::Result<()> {
     let listener: LocalSocketListener =
         ListenerOptions::new().name(ns_name(name)?).create_sync()?;
 
+    let cache = Arc::new(RwLock::new(
+        runtime
+            .lock()
+            .map_err(|_| std::io::Error::other("daemon state poisoned"))?
+            .status(),
+    ));
     eprintln!("savesync-daemon: listening on {name}");
     for conn in listener.incoming() {
         match conn {
             Ok(stream) => {
                 let rt = Arc::clone(&runtime);
+                let cache = cache.clone();
                 std::thread::spawn(move || {
-                    let _ = handle_conn(stream, rt);
+                    let _ = handle_conn(stream, rt, cache);
                 });
             }
             Err(e) => eprintln!("accept error: {e}"),
@@ -38,7 +45,12 @@ pub fn serve(runtime: Arc<Mutex<Runtime>>, name: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-fn handle_conn(stream: LocalSocketStream, runtime: Arc<Mutex<Runtime>>) -> std::io::Result<()> {
+fn handle_conn(
+    stream: LocalSocketStream,
+    runtime: Arc<Mutex<Runtime>>,
+    cache: Arc<RwLock<savesync_core::ipc::ResponsePayload>>,
+) -> std::io::Result<()> {
+    savesync_core::ipc::authorize_peer(&stream)?;
     // &Stream реализует и Read, и Write — клонирование не требуется.
     let mut writer = &stream;
     let mut reader = BufReader::new(&stream);
@@ -52,7 +64,7 @@ fn handle_conn(stream: LocalSocketStream, runtime: Arc<Mutex<Runtime>>) -> std::
             continue;
         }
         let response = match Request::decode(&line) {
-            Ok(req) => dispatch(req, &runtime),
+            Ok(req) => dispatch(req, &runtime, &cache),
             Err(e) => Response::err(0, format!("bad request: {e}")),
         };
         if write_response(&mut writer, response)? {
@@ -79,7 +91,35 @@ fn write_response(writer: &mut impl Write, response: Response) -> std::io::Resul
     delivery.map(|()| false)
 }
 
-fn dispatch(req: Request, runtime: &Arc<Mutex<Runtime>>) -> Response {
+fn dispatch(
+    req: Request,
+    runtime: &Arc<Mutex<Runtime>>,
+    cache: &RwLock<savesync_core::ipc::ResponsePayload>,
+) -> Response {
+    if matches!(req.method, Method::Status) {
+        return match runtime.try_lock() {
+            Ok(runtime) => {
+                if runtime.shutdown_requested {
+                    return Response::err(req.id, "daemon is stopping");
+                }
+                match cache.read() {
+                    Ok(value) => Response::ok(req.id, value.clone()),
+                    Err(_) => Response::err(req.id, "status cache unavailable"),
+                }
+            }
+            Err(TryLockError::WouldBlock) => match cache.read() {
+                Ok(value) => {
+                    let mut status = value.clone();
+                    if let savesync_core::ipc::ResponsePayload::Status(status) = &mut status {
+                        status.busy = true;
+                    }
+                    Response::ok(req.id, status)
+                }
+                Err(_) => Response::err(req.id, "status cache unavailable"),
+            },
+            Err(TryLockError::Poisoned(_)) => Response::err(req.id, "daemon state poisoned"),
+        };
+    }
     let mut rt = match runtime.lock() {
         Ok(rt) => rt,
         Err(_) => return Response::err(req.id, "daemon state poisoned"),
@@ -106,6 +146,12 @@ fn dispatch(req: Request, runtime: &Arc<Mutex<Runtime>>) -> Response {
         Method::GetConfig => rt.get_config(),
         Method::SaveConfig { config } => rt.save_config(*config.clone()),
     };
+    if !rt.shutdown_requested {
+        let status = rt.status();
+        if let Ok(mut value) = cache.write() {
+            *value = status;
+        }
+    }
     Response::ok(req.id, payload)
 }
 
@@ -119,24 +165,7 @@ pub fn probe(name: &str) -> bool {
 
 /// Клиентский вызов: один запрос — одно соединение — один ответ.
 pub fn call(name: &str, request: Request) -> std::io::Result<Response> {
-    let mut stream = LocalSocketStream::connect(ns_name(name)?)?;
-    stream.write_all(
-        request
-            .encode()
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?
-            .as_bytes(),
-    )?;
-    stream.flush()?;
-
-    let mut reader = BufReader::new(stream);
-    let mut line = String::new();
-    if reader.read_line(&mut line)? == 0 {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::UnexpectedEof,
-            "daemon closed connection",
-        ));
-    }
-    Response::decode(&line).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    savesync_core::ipc::client::call(name, request)
 }
 
 #[cfg(test)]
@@ -252,5 +281,23 @@ mod tests {
         )
         .unwrap());
         assert!(write_response(&mut Broken, Response::err(1, "ordinary response")).is_err());
+    }
+    #[test]
+    fn status_stays_responsive_while_runtime_is_busy() {
+        let directory = std::env::temp_dir().join(format!("ss-busy-status-{}", std::process::id()));
+        let runtime = Arc::new(Mutex::new(test_runtime(&directory)));
+        let cache = Arc::new(RwLock::new(runtime.lock().unwrap().status()));
+        let guard = runtime.lock().unwrap();
+        let other = runtime.clone();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let task = std::thread::spawn(move || {
+            let _ = sender.send(dispatch(Request::new(1, Method::Status), &other, &cache));
+        });
+        let response = receiver.recv_timeout(std::time::Duration::from_secs(1));
+        drop(guard);
+        task.join().unwrap();
+        assert!(
+            matches!(response.unwrap().result,Some(ResponsePayload::Status(status))if status.busy)
+        );
     }
 }

@@ -141,6 +141,12 @@ impl AuthorizationSession {
                 break;
             }
         }
+        if !line.ends_with(b"\r\n\r\n") {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "incomplete callback headers",
+            ));
+        }
         let line = std::str::from_utf8(&line)
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid callback"))?;
         let parts: Vec<_> = line
@@ -197,7 +203,9 @@ impl AuthorizationSession {
 }
 fn reply(stream: &mut TcpStream, status: u16, text: &str) -> io::Result<()> {
     let body=format!("<!doctype html><html lang='ru'><meta charset='utf-8'><title>SaveSync</title><p>{text}</p></html>");
-    write!(stream,"HTTP/1.1 {status} OAuth\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",body.len())
+    let response=format!("HTTP/1.1 {status} OAuth\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",body.len());
+    stream.write_all(response.as_bytes())?;
+    stream.shutdown(std::net::Shutdown::Write)
 }
 
 #[cfg(test)]

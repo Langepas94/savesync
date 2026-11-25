@@ -6,6 +6,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 ExecStart=%h/.local/bin/savesync-daemon serve
+ExecStop=%h/.local/bin/savesync-daemon stop
+TimeoutStopSec=infinity
 Restart=on-failure
 RestartSec=5
 
