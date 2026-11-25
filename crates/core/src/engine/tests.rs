@@ -551,3 +551,164 @@ fn empty_directory_cannot_be_uploaded_even_with_a_direct_engine_call() {
     assert!(pc.engine.load_remote().unwrap().game("test-game").is_none());
     assert!(pc.engine.applied_of("test-game").is_none());
 }
+
+#[test]
+fn rollback_removes_only_previously_tracked_slots_and_stays_resolved() {
+    let world = World::new("rollback-exact");
+    let pc = world.device("pc");
+    let manifest = manifest();
+    pc.write_save("v1");
+    let first = match pc.engine.push("test-game", &pc.locations()).unwrap() {
+        PushOutcome::Uploaded(version) => version.id,
+        _ => panic!(),
+    };
+    pc.write_save("v2");
+    std::fs::write(pc.home.join("game/saves/slot2.sav"), "tracked-extra").unwrap();
+    pc.engine.push("test-game", &pc.locations()).unwrap();
+    std::fs::write(
+        pc.home.join("game/saves/untracked.txt"),
+        "precious-untracked",
+    )
+    .unwrap();
+    pc.engine
+        .pull_version(&manifest, &pc.roots, Platform::Windows, &first)
+        .unwrap();
+    assert_eq!(pc.read_save(), "v1");
+    assert!(!pc.home.join("game/saves/slot2.sav").exists());
+    assert_eq!(
+        std::fs::read_to_string(pc.home.join("game/saves/untracked.txt")).unwrap(),
+        "precious-untracked"
+    );
+    assert_eq!(
+        pc.engine
+            .pull(&manifest, &pc.roots, Platform::Windows)
+            .unwrap(),
+        PullOutcome::UpToDate
+    );
+    let backup = find_file(&pc.engine.state_dir.join("backups"), "slot2.sav").unwrap();
+    assert_eq!(std::fs::read_to_string(backup).unwrap(), "tracked-extra");
+}
+
+#[test]
+fn restore_current_version_repairs_missing_and_modified_files() {
+    let world = World::new("repair-current");
+    let pc = world.device("pc");
+    let manifest = manifest();
+    pc.write_save("saved-content");
+    let id = match pc.engine.push("test-game", &pc.locations()).unwrap() {
+        PushOutcome::Uploaded(version) => version.id,
+        _ => panic!(),
+    };
+    std::fs::remove_file(pc.home.join("game/saves/slot1.sav")).unwrap();
+    assert!(matches!(
+        pc.engine
+            .pull_version(&manifest, &pc.roots, Platform::Windows, &id)
+            .unwrap(),
+        PullOutcome::Applied { .. }
+    ));
+    assert_eq!(pc.read_save(), "saved-content");
+    pc.write_save("precious-unsynced");
+    pc.engine
+        .pull_version(&manifest, &pc.roots, Platform::Windows, &id)
+        .unwrap();
+    assert_eq!(pc.read_save(), "saved-content");
+    let backups = pc.engine.state_dir.join("backups");
+    let backup = find_file(&backups, "slot1.sav").unwrap();
+    assert_eq!(
+        std::fs::read_to_string(backup).unwrap(),
+        "precious-unsynced"
+    );
+}
+
+#[test]
+fn cloud_publication_failure_does_not_roll_back_committed_local_restore() {
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
+    struct FailIndex {
+        inner: crate::backend::FsBackend,
+        fail: Arc<AtomicBool>,
+    }
+    impl Backend for FailIndex {
+        fn name(&self) -> &'static str {
+            "test-publication"
+        }
+        fn put_snapshot(&self, g: &str, v: &str, b: &[u8]) -> io::Result<()> {
+            self.inner.put_snapshot(g, v, b)
+        }
+        fn get_snapshot(&self, g: &str, v: &str) -> io::Result<Vec<u8>> {
+            self.inner.get_snapshot(g, v)
+        }
+        fn list_snapshots(&self, g: &str) -> io::Result<Vec<String>> {
+            self.inner.list_snapshots(g)
+        }
+        fn get_index(&self) -> io::Result<Option<Vec<u8>>> {
+            self.inner.get_index()
+        }
+        fn put_index(&self, b: &[u8]) -> io::Result<()> {
+            if self.fail.load(Ordering::Relaxed) {
+                Err(io::Error::other("cloud offline"))
+            } else {
+                self.inner.put_index(b)
+            }
+        }
+    }
+    let world = World::new("publish-after-commit");
+    let pc = world.device("pc");
+    let manifest = manifest();
+    pc.write_save("old");
+    let id = match pc.engine.push("test-game", &pc.locations()).unwrap() {
+        PushOutcome::Uploaded(version) => version.id,
+        _ => panic!(),
+    };
+    pc.write_save("new");
+    pc.engine.push("test-game", &pc.locations()).unwrap();
+    let fail = Arc::new(AtomicBool::new(true));
+    let engine = Engine::new(
+        FailIndex {
+            inner: world.backend(),
+            fail: fail.clone(),
+        },
+        "pc",
+        &pc.engine.state_dir,
+    );
+    assert!(matches!(
+        engine.pull_version(&manifest, &pc.roots, Platform::Windows, &id),
+        Err(EngineError::RestorePublicationPending { .. })
+    ));
+    assert_eq!(pc.read_save(), "old");
+    let applied = engine.applied_of("test-game").unwrap();
+    assert!(engine
+        .load_local()
+        .unwrap()
+        .game("test-game")
+        .unwrap()
+        .get(&applied)
+        .is_some());
+    assert!(engine
+        .load_remote()
+        .unwrap()
+        .game("test-game")
+        .unwrap()
+        .get(&applied)
+        .is_none());
+    fail.store(false, Ordering::Relaxed);
+    assert_eq!(
+        engine.push("test-game", &pc.locations()).unwrap(),
+        PushOutcome::Unchanged
+    );
+    assert!(engine
+        .load_remote()
+        .unwrap()
+        .game("test-game")
+        .unwrap()
+        .get(&applied)
+        .is_some());
+    assert_eq!(
+        engine
+            .pull(&manifest, &pc.roots, Platform::Windows)
+            .unwrap(),
+        PullOutcome::UpToDate
+    );
+}

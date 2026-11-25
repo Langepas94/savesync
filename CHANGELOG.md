@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### Restore transactions
+
+- Staged restore с safety backups и journal, rollback файлов и index/applied
+  при сбое, восстановление незавершённой операции при запуске и per-profile lock.
+- Удаление только stale tracked save files; untracked файлы сохраняются.
+- Явный rollback становится новой merge-версией, repair актуальной версии
+  сверяет реальные файлы. Remote publication следует после локального commit;
+  недоступный канал сообщает `RestorePublicationPending`, повторный sync завершает публикацию.
+
+
 ### Discovery
 
 - Runtime подключает локальный Steam appinfo/UFS и дополнительные библиотеки;

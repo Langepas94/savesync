@@ -213,7 +213,7 @@ fn validate_manifest(manifest: &SnapshotManifest) -> io::Result<()> {
     Ok(())
 }
 
-fn reject_symlink_ancestors(path: &Path) -> io::Result<()> {
+pub(crate) fn validate_target_path(path: &Path) -> io::Result<()> {
     for ancestor in path.ancestors() {
         match std::fs::symlink_metadata(ancestor) {
             Ok(meta) if meta.file_type().is_symlink() => {
@@ -233,7 +233,7 @@ fn reject_symlink_ancestors(path: &Path) -> io::Result<()> {
 pub fn validate_destination(location: &LocationManifest, dest: &Path) -> io::Result<()> {
     for f in &location.files {
         crate::storage_paths::validate_relative(&f.rel_path)?;
-        reject_symlink_ancestors(&dest.join(&f.rel_path))?;
+        validate_target_path(&dest.join(&f.rel_path))?;
     }
     Ok(())
 }
