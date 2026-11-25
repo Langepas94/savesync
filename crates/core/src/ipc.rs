@@ -17,6 +17,20 @@ pub enum Method {
     Scan,
     /// Ручная синхронизация (MVP-триггер). `None` — все игры.
     Sync { game_key: Option<String> },
+    /// История версий игры (из локального индекса).
+    History { game_key: String },
+    /// Применить конкретную версию (откат / выбор ветки конфликта).
+    Restore {
+        game_key: String,
+        version_id: String,
+    },
+    /// Переносимый бэкап игры в папку `backups.dir` (plan §2.2).
+    Backup { game_key: String },
+    /// Текущий конфиг (каналы, бэкапы, пути).
+    GetConfig,
+    /// Сохранить конфиг (каналы/бэкапы/пути). Демон перечитывает его
+    /// на следующую операцию.
+    SaveConfig { config: Box<crate::config::Config> },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -89,6 +103,39 @@ pub enum ResponsePayload {
     Status(StatusPayload),
     Scan(ScanPayload),
     Sync(SyncPayload),
+    History(HistoryPayload),
+    Backup(BackupPayload),
+    Config(ConfigPayload),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoryPayload {
+    pub game_key: String,
+    pub versions: Vec<VersionEntry>,
+    /// Применённая на этом устройстве версия.
+    pub applied: Option<String>,
+    /// «Головы» линии (больше одной = конфликт).
+    pub heads: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VersionEntry {
+    pub id: String,
+    pub parent: Option<String>,
+    pub created_at: u64,
+    pub device: String,
+    pub hash: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackupPayload {
+    pub game_key: String,
+    pub file: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConfigPayload {
+    pub config: crate::config::Config,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -133,6 +180,51 @@ pub struct SyncResult {
     /// uploaded | applied | up_to_date | unchanged | conflict | skipped | error
     pub outcome: String,
     pub detail: Option<String>,
+}
+
+/// Клиентская сторона протокола (desktop app, CLI, Decky-прокси).
+pub mod client {
+    use std::io::{BufRead, BufReader, Write};
+
+    use interprocess::local_socket::{prelude::*, GenericNamespaced, Name};
+
+    use super::{Method, Request, Response};
+
+    /// Имя сокета демона по умолчанию (shared с daemon crate).
+    pub const DEFAULT_SOCKET: &str = "savesync-daemon";
+
+    fn ns_name(name: &str) -> std::io::Result<Name<'static>> {
+        name.to_owned()
+            .to_ns_name::<GenericNamespaced>()
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))
+    }
+
+    /// Клиентский вызов: один запрос — одно соединение — один ответ.
+    pub fn call(name: &str, request: Request) -> std::io::Result<Response> {
+        let mut stream = LocalSocketStream::connect(ns_name(name)?)?;
+        stream.write_all(
+            request
+                .encode()
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?
+                .as_bytes(),
+        )?;
+        stream.flush()?;
+
+        let mut reader = BufReader::new(stream);
+        let mut line = String::new();
+        if reader.read_line(&mut line)? == 0 {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "daemon closed connection",
+            ));
+        }
+        Response::decode(&line).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    }
+
+    /// Есть ли живой демон на сокете.
+    pub fn probe(name: &str) -> bool {
+        call(name, Request::new(0, Method::Status)).is_ok()
+    }
 }
 
 #[cfg(test)]

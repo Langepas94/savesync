@@ -15,3 +15,4 @@ blake3.workspace = true
 glob.workspace = true
 zip.workspace = true
 ureq.workspace = true
+interprocess.workspace = true

@@ -606,6 +606,14 @@ fn cmd_via_daemon_or_direct(method: Method) -> i32 {
         Method::Scan => rt.scan(),
         Method::Sync { game_key } => rt.sync(game_key.as_deref()),
         Method::Status => rt.status(),
+        Method::History { game_key } => rt.history(game_key),
+        Method::Restore {
+            game_key,
+            version_id,
+        } => rt.restore(game_key, version_id),
+        Method::Backup { game_key } => rt.backup_game(game_key),
+        Method::GetConfig => rt.get_config(),
+        Method::SaveConfig { config } => rt.save_config(*config.clone()),
     };
     print_payload(&payload);
     0
