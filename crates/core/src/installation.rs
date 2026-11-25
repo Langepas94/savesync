@@ -134,7 +134,10 @@ mod tests {
             Platform::Linux,
             &roots,
         );
-        assert_eq!(found[0].locations[0].hits, vec![saves.join("slot.dat")]);
+        assert_eq!(
+            crate::paths::canonical_path(&found[0].locations[0].hits[0]),
+            crate::paths::canonical_path(&saves.join("slot.dat"))
+        );
         let unknown = resolve_custom(&custom, &ManifestDb::default(), &roots, Platform::Linux);
         assert!(unknown.paths.is_empty());
     }

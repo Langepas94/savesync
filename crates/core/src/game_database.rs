@@ -170,7 +170,9 @@ mod tests {
         assert!(found.iter().any(|game| game
             .locations
             .iter()
-            .any(|location| location.hits.contains(&save))));
+            .any(|location| location.hits.iter().any(
+                |hit| crate::paths::canonical_path(hit) == crate::paths::canonical_path(&save)
+            ))));
         let before = db.get("grand-theft-auto-iv").unwrap().paths.len();
         add_matching(&mut db, &HashSet::from([12210]), &HashSet::new());
         assert_eq!(before, db.get("grand-theft-auto-iv").unwrap().paths.len());
