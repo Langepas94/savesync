@@ -23,10 +23,12 @@ spec.loader.exec_module(proxy)
 
 
 def serve_once(path: Path, response: dict, captured: list) -> threading.Thread:
+    # bind/listen синхронно — иначе клиент может подключиться до bind.
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    srv.bind(str(path))
+    srv.listen(1)
+
     def _run():
-        srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        srv.bind(str(path))
-        srv.listen(1)
         conn, _ = srv.accept()
         data = b""
         while not data.endswith(b"\n"):
@@ -51,8 +53,9 @@ class RpcTest(unittest.TestCase):
 
         self.tmpdir = Path(tempfile.mkdtemp(prefix="ss-"))
         self.sock_path = self.tmpdir / "t.sock"
-        self.addCleanup(self.sock_path.unlink, missing_ok=True)
+        # Cleanup выполняется в обратном порядке: сначала rmdir (пустого).
         self.addCleanup(self.tmpdir.rmdir)
+        self.addCleanup(self.sock_path.unlink, missing_ok=True)
         self._orig = proxy.SOCKET_ADDRESS
         proxy.SOCKET_ADDRESS = str(self.sock_path)
         self.addCleanup(setattr, proxy, "SOCKET_ADDRESS", self._orig)
