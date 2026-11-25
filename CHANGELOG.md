@@ -98,3 +98,17 @@
 - CLI `backup create|list|import|dir|auto`; в `serve` — тред авто-бэкапов
   по расписанию (`backups.auto_interval_hours`, проверка раз в 30 мин).
 - CI (GitHub Actions): fmt, clippy, test на Windows и Ubuntu.
+- `savesync-app` — десктопное приложение (M4, eframe/egui, палитра Steam):
+  список игр со статусами, синхронизация всех/одной игры в фоне
+  (спиннер, без блокировки UI), детали игры с историей версий и
+  применением любой версии, конфликт-резолвер (выбор ветки при
+  нескольких «головах»), кнопка переносимого бэкапа, экраны
+  «Подключения» (fs/Яндекс/Google/LAN) и «Настройки» (бэкапы,
+  устройство) через SaveConfig; баннер с подсказкой, когда демон не
+  запущен.
+- `savesync-core::ipc`: методы `history`/`restore`/`backup`/`get_config`/
+  `save_config` и клиентский модуль `ipc::client` (`call`/`probe`,
+  `DEFAULT_SOCKET`) — общий для приложения, CLI и будущего Decky-прокси.
+- Демон: runtime-методы `history`, `restore`, `backup_game`,
+  `get_config`, `save_config` (сохраняет device_id/name), IPC-диспетчер
+  покрывает все методы приложения.

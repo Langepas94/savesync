@@ -8,3 +8,4 @@ repository.workspace = true
 
 [dependencies]
 savesync-core = { path = "../core" }
+eframe = "0.29"

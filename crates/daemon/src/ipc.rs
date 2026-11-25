@@ -72,6 +72,14 @@ fn dispatch(req: Request, runtime: &Arc<Mutex<Runtime>>) -> Response {
         Method::Status => rt.status(),
         Method::Scan => rt.scan(),
         Method::Sync { game_key } => rt.sync(game_key.as_deref()),
+        Method::History { game_key } => rt.history(game_key),
+        Method::Restore {
+            game_key,
+            version_id,
+        } => rt.restore(game_key, version_id),
+        Method::Backup { game_key } => rt.backup_game(game_key),
+        Method::GetConfig => rt.get_config(),
+        Method::SaveConfig { config } => rt.save_config(*config.clone()),
     };
     Response::ok(req.id, payload)
 }
