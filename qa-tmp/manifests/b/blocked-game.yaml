@@ -1,0 +1,9 @@
+schema: 1
+name: Blocked Game
+slug: blocked-game
+paths:
+  - pattern: "<home>/blocked/saves"
+    os: any
+portability:
+  status: blocked
+  reason: "machine-locked secure_save"

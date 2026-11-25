@@ -17,7 +17,7 @@ pub(crate) struct Tray {
     events: Receiver<Action>,
 }
 impl Tray {
-    pub fn new(context: &egui::Context) -> Result<Self, String> {
+    pub fn new(context: &egui::Context, icon: &egui::IconData) -> Result<Self, String> {
         let menu = Menu::new();
         let open = MenuItem::new("Открыть SaveSync", true, None);
         let sync = MenuItem::new("Синхронизировать", true, None);
@@ -39,27 +39,8 @@ impl Tray {
                 context.request_repaint();
             }
         }));
-        let mut pixels = vec![0; 32 * 32 * 4];
-        for y in 0..32 {
-            for x in 0..32 {
-                let offset = (y * 32 + x) * 4;
-                let inside = (x as i32 - 16).pow(2) + (y as i32 - 16).pow(2) < 225;
-                let stripe = (8..24).contains(&x)
-                    && ((7..11).contains(&y) || (14..18).contains(&y) || (21..25).contains(&y))
-                    || ((8..12).contains(&x) && (9..16).contains(&y))
-                    || ((20..24).contains(&x) && (16..23).contains(&y));
-                pixels[offset..offset + 4].copy_from_slice(if inside {
-                    if stripe {
-                        &[23, 26, 33, 255]
-                    } else {
-                        &[102, 192, 244, 255]
-                    }
-                } else {
-                    &[0, 0, 0, 0]
-                });
-            }
-        }
-        let icon = Icon::from_rgba(pixels, 32, 32).map_err(|error| error.to_string())?;
+        let icon = Icon::from_rgba(icon.rgba.clone(), icon.width, icon.height)
+            .map_err(|error| error.to_string())?;
         let icon = TrayIconBuilder::new()
             .with_tooltip("SaveSync")
             .with_menu(Box::new(menu))

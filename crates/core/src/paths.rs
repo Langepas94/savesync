@@ -137,6 +137,15 @@ pub fn resolve_pattern(pattern: &str, roots: &Roots) -> Option<String> {
     resolve_pattern_multi(pattern, roots).into_iter().next()
 }
 
+/// Convert a literal filesystem path to a pattern usable by the save scanner.
+pub fn literal_save_pattern(path: &std::path::Path) -> String {
+    let path = canonical_path(path);
+    let pattern = path.to_string_lossy();
+    #[cfg(windows)]
+    let pattern = pattern.replace('\\', "/");
+    glob::Pattern::escape(&pattern)
+}
+
 /// Canonicalize trusted path roots without exposing Windows verbatim prefixes
 /// to glob's '?' parser. Missing suffixes are preserved for first-save restore.
 pub fn canonical_path(path: &std::path::Path) -> PathBuf {

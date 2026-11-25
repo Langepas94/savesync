@@ -6,8 +6,8 @@
 
 Из одного комплекта проверки возьмите:
 
-- **На Windows:** `windows/savesync-setup-dev.exe`.
-- **На Steam Deck:** `steamos/savesync-steamos.tar.gz`.
+- **На Windows:** `Windows/savesync-setup-dev.exe`.
+- **На Steam Deck:** `SteamDeck/savesync-steamos.tar.gz`.
 
 Рядом лежат файлы `.sha256` для проверки целостности. Windows-установщик пока не подписан. Оба пакета должны быть из одного комплекта: не смешивайте прежнюю сборку `fb3b031` с новой.
 

@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "device_id": "device-7a7b23a1",
+  "device_name": "device",
+  "manifests_dir": "C:/Users/Artempk/steamdecksaver/Steam deck save/savesync/qa-tmp/manifests",
+  "backends": {
+    "fs_path": "C:/Users/Artempk/steamdecksaver/Steam deck save/savesync/qa-tmp/remote",
+    "yandex": null,
+    "google": null,
+    "lan": {
+      "port": 47812,
+      "pin": "1234",
+      "peers": [
+        "127.0.0.1:47811"
+      ]
+    }
+  },
+  "backups": {
+    "dir": null,
+    "keep": null,
+    "auto_interval_hours": null
+  }
+}

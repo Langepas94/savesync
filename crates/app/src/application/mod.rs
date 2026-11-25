@@ -58,6 +58,7 @@ pub(crate) struct SaveSyncApp {
     oauth_pending: Option<savesync_core::oauth::Provider>,
     client: Arc<dyn DaemonClient>,
     tab: Tab,
+    add_game: Option<games::AddGameForm>,
     daemon_ok: bool,
     status: Option<StatusPayload>,
     notice: Option<(String, bool)>, // (текст, это ошибка)
@@ -86,6 +87,7 @@ impl SaveSyncApp {
             oauth_pending: None,
             client: Arc::new(IpcDaemonClient),
             tab: Tab::Games,
+            add_game: None,
             daemon_ok: false,
             status: None,
             notice: None,
@@ -105,10 +107,11 @@ impl SaveSyncApp {
         context: &egui::Context,
         minimized: bool,
         startup_error: Option<String>,
+        icon: &egui::IconData,
     ) {
         #[cfg(windows)]
         {
-            match crate::tray::Tray::new(context) {
+            match crate::tray::Tray::new(context, icon) {
                 Ok(tray) => {
                     self.tray = Some(tray);
                     if minimized {
@@ -119,7 +122,7 @@ impl SaveSyncApp {
             }
         }
         #[cfg(not(windows))]
-        let _ = (context, minimized);
+        let _ = (context, minimized, icon);
         if let Some(error) = startup_error {
             self.set_notice(error, true);
         }

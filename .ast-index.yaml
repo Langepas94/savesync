@@ -1,0 +1,12 @@
+include:
+  - crates
+  - decky-plugin
+  - packaging
+exclude:
+  - target
+  - node_modules
+  - decky-plugin/node_modules
+  - decky-plugin/dist
+  - decky-plugin/out
+  - qa-tmp
+  - .agents
