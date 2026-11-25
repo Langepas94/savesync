@@ -210,3 +210,29 @@ sources: [appinfo, community]    # appinfo | pcgamingwiki | community
 (`Manifest::validate`, ошибки — в лог, запись пропускается) и матчит игры по
 `slug` + `ids` + `aliases`. Ручные правила пользователя хранятся отдельно
 (`custom:<slug>`) и никогда не перезаписываются обновлением базы.
+
+
+## Логическая save location между платформами
+
+Опциональное поле `paths[].location` связывает эквивалентные правила разных ОС.
+Например:
+
+```yaml
+paths:
+  - pattern: "<winAppData>/Game/saves/*.sav"
+    os: windows
+    location: campaign
+  - pattern: "<xdgData>/Game/saves/*.sav"
+    os: linux
+    location: campaign
+```
+
+Новые snapshots сохраняют `location` независимо от исходного pattern.
+Целевой manifest должен содержать однозначное правило этой location для своей
+платформы. Без явного ID разрешены точное совпадение pattern и стандартное
+сопоставление Windows/Proton; произвольный выбор пути по порядку запрещён.
+Неполное или неоднозначное сопоставление отклоняется до изменения сейвов.
+
+`game_key` остаётся прежним в IPC, JSON и manifest. В локальной файловой
+структуре `custom:<slug>` кодируется как `custom__<slug>`; Windows reserved
+keys получают префикс `game__`. Формат обычных slug-папок не меняется.

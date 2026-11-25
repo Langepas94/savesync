@@ -37,6 +37,8 @@ pub struct SnapshotManifest {
 /// Одна save-локация внутри снапшота.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LocationManifest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub location: Option<String>,
     /// Паттерн из манифеста игры — по нему целевое устройство
     /// перерезолвит базу при восстановлении.
     pub pattern: String,
@@ -64,6 +66,12 @@ pub fn location_base(resolved: &str) -> PathBuf {
 
 /// Рекурсивно собирает файлы локации (hits могут быть файлами и папками).
 fn collect_files(base: &Path, hit: &Path, out: &mut Vec<(PathBuf, PathBuf)>) -> io::Result<()> {
+    if std::fs::symlink_metadata(hit)?.file_type().is_symlink() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "symlink in save location",
+        ));
+    }
     if hit.is_dir() {
         for entry in std::fs::read_dir(hit)? {
             collect_files(base, &entry?.path(), out)?;
@@ -107,6 +115,7 @@ pub fn create(
             collect_files(&base, hit, &mut pairs)?;
         }
         pairs.sort();
+        pairs.dedup();
 
         let mut files = Vec::new();
         for (rel, abs) in pairs {
@@ -124,6 +133,7 @@ pub fn create(
             zip.write_all(&data)?;
         }
         manifest.locations.push(LocationManifest {
+            location: loc.location.clone(),
             pattern: loc.pattern.clone(),
             archive_dir,
             files,
@@ -153,21 +163,76 @@ pub fn read_manifest(archive: &Path) -> io::Result<SnapshotManifest> {
 /// Проверяет целостность: хеш каждого файла в архиве = хешу в манифесте.
 pub fn verify(archive: &Path) -> io::Result<bool> {
     let manifest = read_manifest(archive)?;
+    validate_manifest(&manifest)?;
     let file = std::fs::File::open(archive)?;
     let mut zip = zip::ZipArchive::new(file).map_err(to_io)?;
 
+    let mut hashes = Vec::new();
     for loc in &manifest.locations {
         for f in &loc.files {
             let name = format!("{}/{}", loc.archive_dir, f.rel_path);
             let mut entry = zip.by_name(&name).map_err(to_io)?;
+            if entry.size() != f.size {
+                return Ok(false);
+            }
             let mut hasher = blake3::Hasher::new();
             io::copy(&mut entry, &mut hasher)?;
-            if hasher.finalize().to_hex().as_str() != f.hash {
+            let hash = hasher.finalize();
+            if hash.to_hex().as_str() != f.hash {
                 return Ok(false);
+            }
+            hashes.push((name, hash));
+        }
+    }
+    Ok(hash::hash_snapshot(hashes).to_hex().as_str() == manifest.content_hash)
+}
+
+fn validate_manifest(manifest: &SnapshotManifest) -> io::Result<()> {
+    crate::storage_paths::game_component(&manifest.game_key)?;
+    let mut names = std::collections::HashSet::new();
+    for (i, loc) in manifest.locations.iter().enumerate() {
+        if loc.archive_dir != format!("loc{i}") {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid archive directory",
+            ));
+        }
+        for file in &loc.files {
+            crate::storage_paths::validate_relative(&file.rel_path)?;
+            if !names.insert(format!("{}/{}", loc.archive_dir, file.rel_path).to_lowercase()) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "duplicate snapshot path",
+                ));
             }
         }
     }
-    Ok(true)
+    Ok(())
+}
+
+fn reject_symlink_ancestors(path: &Path) -> io::Result<()> {
+    for ancestor in path.ancestors() {
+        match std::fs::symlink_metadata(ancestor) {
+            Ok(meta) if meta.file_type().is_symlink() => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "symlink in restore destination",
+                ))
+            }
+            Ok(_) => (),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => (),
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
+}
+
+pub fn validate_destination(location: &LocationManifest, dest: &Path) -> io::Result<()> {
+    for f in &location.files {
+        crate::storage_paths::validate_relative(&f.rel_path)?;
+        reject_symlink_ancestors(&dest.join(&f.rel_path))?;
+    }
+    Ok(())
 }
 
 /// Распаковывает одну локацию снапшота в `dest` (создаётся при
@@ -178,11 +243,29 @@ pub fn extract_location(
     location: &LocationManifest,
     dest: &Path,
 ) -> io::Result<()> {
+    extract_location_mapped(archive, location, location, dest)
+}
+
+/// Archive names remain immutable when a platform uses different target names.
+pub fn extract_location_mapped(
+    archive: &Path,
+    source: &LocationManifest,
+    location: &LocationManifest,
+    dest: &Path,
+) -> io::Result<()> {
     let file = std::fs::File::open(archive)?;
     let mut zip = zip::ZipArchive::new(file).map_err(to_io)?;
 
-    for f in &location.files {
-        let name = format!("{}/{}", location.archive_dir, f.rel_path);
+    // Validate every destination before writing the first file.
+    validate_destination(location, dest)?;
+    if source.files.len() != location.files.len() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "incomplete location mapping",
+        ));
+    }
+    for (original, f) in source.files.iter().zip(&location.files) {
+        let name = format!("{}/{}", source.archive_dir, original.rel_path);
         let mut entry = zip.by_name(&name).map_err(to_io)?;
         // Защита от zip-slip: относительный путь не должен выходить из dest.
         let rel = Path::new(&f.rel_path);
@@ -217,101 +300,4 @@ fn to_io(e: zip::result::ZipError) -> io::Error {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct Fixture(PathBuf);
-
-    impl Fixture {
-        fn new(name: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!(
-                "savesync-test-snap-{}-{}",
-                name,
-                std::process::id()
-            ));
-            let _ = std::fs::remove_dir_all(&dir);
-            std::fs::create_dir_all(&dir).unwrap();
-            Fixture(dir)
-        }
-        fn path(&self, rel: &str) -> PathBuf {
-            self.0.join(rel)
-        }
-    }
-
-    impl Drop for Fixture {
-        fn drop(&mut self) {
-            std::fs::remove_dir_all(&self.0).ok();
-        }
-    }
-
-    fn make_game_dir(fx: &Fixture) -> SaveLocation {
-        std::fs::create_dir_all(fx.path("game/saves/nested")).unwrap();
-        std::fs::write(fx.path("game/saves/slot1.sav"), b"save-one").unwrap();
-        std::fs::write(fx.path("game/saves/nested/slot2.sav"), b"save-two").unwrap();
-        let resolved = fx.path("game/saves").to_string_lossy().replace('\\', "/");
-        SaveLocation {
-            pattern: "<home>/game/saves".into(),
-            resolved: format!("{resolved}/**"),
-            hits: vec![fx.path("game/saves")],
-        }
-    }
-
-    #[test]
-    fn base_strips_glob() {
-        assert_eq!(
-            location_base("C:/Users/g/AppData/Roaming/Game/saves/*.sav"),
-            PathBuf::from("C:/Users/g/AppData/Roaming/Game/saves/")
-        );
-        assert_eq!(
-            location_base("/home/deck/.config/game"),
-            PathBuf::from("/home/deck/.config/")
-        );
-    }
-
-    #[test]
-    fn create_read_verify_roundtrip() {
-        let fx = Fixture::new("roundtrip");
-        let loc = make_game_dir(&fx);
-        let archive = fx.path("snap.zip");
-
-        let manifest = create("test-game", "dev1", &[loc], &archive).unwrap();
-        assert_eq!(manifest.game_key, "test-game");
-        assert_eq!(manifest.locations.len(), 1);
-        assert_eq!(manifest.locations[0].files.len(), 2);
-        assert!(!manifest.content_hash.is_empty());
-
-        let loaded = read_manifest(&archive).unwrap();
-        assert_eq!(loaded, manifest);
-        assert!(verify(&archive).unwrap());
-    }
-
-    #[test]
-    fn content_hash_changes_with_content() {
-        let fx = Fixture::new("hash");
-        let loc = make_game_dir(&fx);
-        let m1 = create("g", "d", std::slice::from_ref(&loc), &fx.path("1.zip")).unwrap();
-        std::fs::write(fx.path("game/saves/slot1.sav"), b"changed").unwrap();
-        let m2 = create("g", "d", std::slice::from_ref(&loc), &fx.path("2.zip")).unwrap();
-        assert_ne!(m1.content_hash, m2.content_hash);
-
-        // Пересоздание без изменений — тот же хеш (новая версия не нужна).
-        let m3 = create("g", "d", std::slice::from_ref(&loc), &fx.path("3.zip")).unwrap();
-        assert_eq!(m2.content_hash, m3.content_hash);
-    }
-
-    #[test]
-    fn extract_restores_files() {
-        let fx = Fixture::new("extract");
-        let loc = make_game_dir(&fx);
-        let archive = fx.path("snap.zip");
-        let manifest = create("g", "d", &[loc], &archive).unwrap();
-
-        let dest = fx.path("restored");
-        extract_location(&archive, &manifest.locations[0], &dest).unwrap();
-        assert_eq!(std::fs::read(dest.join("slot1.sav")).unwrap(), b"save-one");
-        assert_eq!(
-            std::fs::read(dest.join("nested/slot2.sav")).unwrap(),
-            b"save-two"
-        );
-    }
-}
+mod tests;

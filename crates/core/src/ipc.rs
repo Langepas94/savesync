@@ -193,6 +193,14 @@ pub mod client {
     /// Имя сокета демона по умолчанию (shared с daemon crate).
     pub const DEFAULT_SOCKET: &str = "savesync-daemon";
 
+    /// Override the IPC namespace for isolated tests or multiple profiles.
+    pub fn socket_name() -> String {
+        std::env::var("SAVESYNC_SOCKET")
+            .ok()
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| DEFAULT_SOCKET.to_string())
+    }
+
     fn ns_name(name: &str) -> std::io::Result<Name<'static>> {
         name.to_owned()
             .to_ns_name::<GenericNamespaced>()

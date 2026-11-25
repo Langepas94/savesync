@@ -72,6 +72,9 @@ impl Ids {
 /// Один путь сейвов из манифеста.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PathRule {
+    /// Stable logical location shared by equivalent Windows/Linux rules.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub location: Option<String>,
     /// Паттерн с плейсхолдером (`<winAppData>/...`, `<steamCompat>/...`),
     /// glob-символы `*`, `**`, `?` допустимы.
     pub pattern: String,
@@ -388,6 +391,7 @@ paths:
         let m = Manifest::custom(
             "My Indie Game",
             vec![PathRule {
+                location: None,
                 pattern: "<documents>/My Indie Game/saves".into(),
                 os: Os::Any,
                 tags: vec!["save".into()],
@@ -411,6 +415,7 @@ paths:
         assert!(Manifest::custom(
             "X",
             vec![PathRule {
+                location: None,
                 pattern: "".into(),
                 os: Os::Any,
                 tags: vec![],

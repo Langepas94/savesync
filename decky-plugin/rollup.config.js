@@ -20,6 +20,7 @@ export default {
   external: ["react", "react-dom", "@decky/api", "@decky/ui"],
   output: {
     file: "dist/index.js",
+    name: "SaveSync",
     globals: {
       react: "SP_REACT",
       "react-dom": "SP_REACTDOM",
