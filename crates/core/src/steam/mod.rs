@@ -162,7 +162,7 @@ pub fn match_manifests(db: &ManifestDb, apps: &[SteamApp]) -> Vec<SteamMatch> {
         let appid = app.appid.to_string();
         let by_id = db
             .iter()
-            .find(|m| m.ids.steam.iter().any(|id| id == &appid));
+            .find(|m| !m.slug.starts_with("custom:") && m.ids.steam.iter().any(|id| id == &appid));
         let (m, kind) = match by_id {
             Some(m) => (m, MatchKind::SteamId),
             None => {

@@ -21,6 +21,10 @@ pub enum Method {
     Scan,
     /// Reload installed/curated/custom manifests and rescan without restart.
     ReloadManifests,
+    AddCustomGame {
+        name: String,
+        paths: Vec<String>,
+    },
     SetGameHidden {
         game_key: String,
         hidden: bool,

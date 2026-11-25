@@ -126,5 +126,18 @@ pub fn discover(
             Err(error) => diagnostics.push(format!("{}: {error}", path.display())),
         }
     }
+    for matched in super::match_manifests(db, &apps) {
+        let Some(mut manifest) = db.get(&matched.game_key).cloned() else {
+            continue;
+        };
+        for rule in &mut manifest.paths {
+            if let Some(tail) = rule.pattern.strip_prefix("<base>/") {
+                rule.location
+                    .get_or_insert_with(|| format!("install/{tail}"));
+                rule.pattern = format!("<steamInstall>/{}/{tail}", matched.appid);
+            }
+        }
+        db.insert(manifest);
+    }
     (apps, libraries, diagnostics)
 }

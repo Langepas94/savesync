@@ -91,6 +91,14 @@ impl Client {
 }
 fn network_error(error: ureq::Error) -> io::Error {
     match error {
+        ureq::Error::Status(403 | 429, response)
+            if response.header("X-RateLimit-Remaining") == Some("0")
+                || response.header("Retry-After").is_some() =>
+        {
+            io::Error::other(
+                "GitHub ограничил число запросов для этого IP. Повторите проверку позже.",
+            )
+        }
         ureq::Error::Status(code, _) => {
             io::Error::other(format!("GitHub Releases вернул HTTP {code}"))
         }

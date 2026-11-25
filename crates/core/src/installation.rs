@@ -1,23 +1,38 @@
 //! Resolve selected installation folders through the available game database.
 use crate::{
-    game_key::slugify,
-    manifest::{Manifest, ManifestDb, Os},
+    game_key::{slugify, title_initials},
+    manifest::{Manifest, ManifestDb},
     paths::{Platform, Roots},
 };
-use std::collections::HashSet;
-use std::path::Path;
+use std::collections::{BTreeSet, HashSet};
+use std::path::{Path, PathBuf};
 
-// Match the executable path, not the user-provided SaveSync display name.
-fn steam_shortcut(folder: &Path, roots: &Roots) -> Option<(String, String)> {
+mod fallback;
+mod launchers;
+mod prefixes;
+
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+struct Shortcut {
+    app_id: String,
+    name: String,
+    options: String,
+    executable: PathBuf,
+    start_dir: Option<PathBuf>,
+}
+
+fn steam_shortcuts(roots: &Roots) -> BTreeSet<Shortcut> {
     use crate::steam::kv_binary::{Parser, Value};
-    let folder = crate::paths::canonical_path(folder);
-    let mut matches = HashSet::new();
+
+    let mut matches = BTreeSet::new();
     for root in &roots.steam_libraries {
         let pattern = format!(
             "{}/userdata/*/config/shortcuts.vdf",
-            glob::Pattern::escape(&root.to_string_lossy().replace('\\', "/"))
+            crate::paths::literal_save_pattern(root)
         );
-        for file in glob::glob(&pattern).ok()?.flatten() {
+        let Ok(files) = glob::glob(&pattern) else {
+            continue;
+        };
+        for file in files.flatten() {
             let Ok(data) = std::fs::read(file) else {
                 continue;
             };
@@ -27,7 +42,7 @@ fn steam_shortcut(folder: &Path, roots: &Roots) -> Option<(String, String)> {
             let Some(entries) = tree
                 .iter()
                 .find(|(key, _)| key.eq_ignore_ascii_case("shortcuts"))
-                .and_then(|(_, v)| v.as_map())
+                .and_then(|(_, value)| value.as_map())
             else {
                 continue;
             };
@@ -38,28 +53,101 @@ fn steam_shortcut(folder: &Path, roots: &Roots) -> Option<(String, String)> {
                 let get = |key: &str| {
                     fields
                         .iter()
-                        .find(|(k, _)| k.eq_ignore_ascii_case(key))
-                        .map(|(_, v)| v)
+                        .find(|(field, _)| field.eq_ignore_ascii_case(key))
+                        .map(|(_, value)| value)
                 };
-                let (Some(exe), Some(name), Some(Value::I32(id))) = (
+                let (Some(executable), Some(name), Some(Value::I32(id))) = (
                     get("exe").and_then(Value::as_str),
                     get("appname").and_then(Value::as_str),
                     get("appid"),
                 ) else {
                     continue;
                 };
-                let exe = Path::new(exe.trim_matches('"'));
-                if exe.is_absolute() && crate::paths::canonical_path(exe).starts_with(&folder) {
-                    matches.insert((name.to_string(), (*id as u32).to_string()));
+                let executable = Path::new(executable.trim_matches('"'));
+                if !executable.is_absolute() {
+                    continue;
                 }
+                let start_dir = get("startdir")
+                    .and_then(Value::as_str)
+                    .map(|value| Path::new(value.trim_matches('"')))
+                    .filter(|path| path.is_absolute() && path.is_dir())
+                    .map(crate::paths::canonical_path);
+                matches.insert(Shortcut {
+                    app_id: (*id as u32).to_string(),
+                    name: name.to_string(),
+                    options: get("launchoptions")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                    executable: crate::paths::canonical_path(executable),
+                    start_dir,
+                });
             }
         }
     }
-    if matches.len() == 1 {
-        matches.into_iter().next()
-    } else {
-        None
+    matches
+}
+
+pub fn discover_steam_shortcuts(
+    db: &ManifestDb,
+    roots: &Roots,
+    platform: Platform,
+) -> Vec<Manifest> {
+    if platform != Platform::Linux {
+        return Vec::new();
     }
+    let mut discovered = Vec::new();
+    for shortcut in steam_shortcuts(roots) {
+        let Some(parent) = shortcut
+            .executable
+            .parent()
+            .filter(|parent| parent.parent().is_some())
+        else {
+            continue;
+        };
+        if !shortcut.executable.is_file() {
+            continue;
+        }
+        let folder = shortcut
+            .start_dir
+            .as_deref()
+            .filter(|path| path.parent().is_some() && shortcut.executable.starts_with(path))
+            .unwrap_or(parent);
+        if folder.starts_with("/usr")
+            || folder.starts_with("/bin")
+            || roots.home.as_deref() == Some(folder)
+        {
+            continue;
+        }
+        if !shortcut
+            .executable
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"))
+            && shortcut.start_dir.as_deref() != Some(folder)
+        {
+            continue;
+        }
+        let Ok(custom) = Manifest::custom(
+            &shortcut.name,
+            vec![crate::manifest::PathRule {
+                location: None,
+                pattern: crate::paths::literal_save_pattern(folder),
+                os: crate::manifest::Os::Linux,
+                tags: vec!["save".into()],
+            }],
+        ) else {
+            continue;
+        };
+        let (mut manifest, identity) =
+            resolve_folder(custom, db, roots, platform, folder, Some(&shortcut));
+        if let Some(identity) = identity {
+            manifest.slug = identity;
+        }
+        if !manifest.paths.is_empty() {
+            discovered.push(manifest);
+        }
+    }
+    discovered
 }
 
 pub fn resolve_custom(
@@ -68,119 +156,196 @@ pub fn resolve_custom(
     roots: &Roots,
     platform: Platform,
 ) -> Manifest {
-    let mut result = custom.clone();
+    resolve_custom_with_identity(custom, db, roots, platform).0
+}
+
+pub fn resolve_custom_with_identity(
+    custom: &Manifest,
+    db: &ManifestDb,
+    roots: &Roots,
+    platform: Platform,
+) -> (Manifest, Option<String>) {
+    let explicit = || {
+        let mut manifest = custom.clone();
+        if let Some(known) = custom.catalog_key.as_deref().and_then(|key| db.get(key)) {
+            manifest.portability = known.portability.clone();
+            manifest.ids = known.ids.clone();
+        }
+        (manifest, custom.catalog_key.clone())
+    };
     if custom.paths.len() != 1 {
-        return result;
+        return explicit();
     }
     let Ok(mut matches) = glob::glob(&custom.paths[0].pattern) else {
-        return result;
+        return explicit();
     };
     let Some(Ok(folder)) = matches.next() else {
-        return result;
+        return explicit();
     };
     if matches.next().is_some() || !folder.is_dir() {
-        return result;
+        return explicit();
     }
-    let shortcut = if platform == Platform::Linux {
-        steam_shortcut(&folder, roots)
+    let folder = crate::paths::canonical_path(&folder);
+    let shortcuts = if platform == Platform::Linux {
+        steam_shortcuts(roots)
+    } else {
+        BTreeSet::new()
+    };
+    let mut matching = shortcuts
+        .iter()
+        .filter(|entry| entry.executable.starts_with(&folder));
+    let first = matching.next();
+    let shortcut = if matching.next().is_none() {
+        first
     } else {
         None
     };
-    let executable = std::fs::read_dir(&folder).ok().is_some_and(|entries| {
-        entries.flatten().any(|entry| {
-            entry
-                .path()
-                .extension()
-                .is_some_and(|ext| ext.to_string_lossy().eq_ignore_ascii_case("exe"))
-                && entry.path().is_file()
+    let resolved = resolve_folder(custom.clone(), db, roots, platform, &folder, shortcut);
+    if resolved.1.is_none() && custom.catalog_key.is_some() {
+        let (mut manifest, identity) = explicit();
+        manifest.paths = resolved.0.paths;
+        (manifest, identity)
+    } else {
+        resolved
+    }
+}
+
+fn resolve_folder(
+    mut result: Manifest,
+    db: &ManifestDb,
+    roots: &Roots,
+    platform: Platform,
+    folder: &Path,
+    shortcut: Option<&Shortcut>,
+) -> (Manifest, Option<String>) {
+    let executables = std::fs::read_dir(folder)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("exe"))
+                && path.is_file()
         })
-    });
-    if !executable && shortcut.is_none() {
-        return result;
-    }
-    // Never treat a detected installation as a save folder, even when no match exists.
-    result.paths.clear();
-    let name = slugify(
+        .collect::<Vec<_>>();
+    let folder_name = folder
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(slugify);
+    let is_installation = !executables.is_empty() || shortcut.is_some();
+    let names: Vec<_> = if is_installation {
         shortcut
-            .as_ref()
-            .map_or(custom.name.as_str(), |s| s.0.as_str()),
-    );
-    let mut shortcut_db = ManifestDb::default();
-    crate::game_database::add_matching(
-        &mut shortcut_db,
-        &HashSet::new(),
-        &HashSet::from([name.clone()]),
-    );
-    let mut known = db.iter().chain(shortcut_db.iter()).filter(|m| {
-        !m.slug.starts_with("custom:")
-            && (slugify(&m.name) == name || m.aliases.iter().any(|alias| slugify(alias) == name))
-    });
-    let Some(manifest) = known.next() else {
-        return result;
+            .iter()
+            .map(|entry| slugify(&entry.name))
+            .chain([slugify(&result.name)])
+            .chain(folder_name)
+            .collect()
+    } else {
+        folder_name.into_iter().collect()
     };
-    if known.any(|other| other.slug != manifest.slug) {
-        return result;
-    }
+    let executable_names: HashSet<_> = executables
+        .iter()
+        .filter_map(|path| path.file_stem().and_then(|name| name.to_str()))
+        .map(slugify)
+        .filter(|name| {
+            !matches!(
+                name.as_str(),
+                "game" | "launcher" | "start" | "run" | "launch" | "setup"
+            )
+        })
+        .collect();
+    let mut fallback_db = ManifestDb::default();
+    crate::game_database::add_installation_matches(
+        &mut fallback_db,
+        &names.iter().chain(&executable_names).cloned().collect(),
+    );
+    let manifest = names
+        .iter()
+        .find_map(|name| match_name(db, &fallback_db, |candidate| candidate == name))
+        .or_else(|| {
+            match_name(db, &fallback_db, |candidate| {
+                executable_names.contains(candidate)
+            })
+        })
+        .or_else(|| {
+            if !is_installation {
+                return None;
+            }
+            let abbreviations: HashSet<_> = names
+                .iter()
+                .chain(&executable_names)
+                .map(|name| name.replace('-', ""))
+                .collect();
+            match_name(db, &fallback_db, |candidate| {
+                title_initials(candidate).is_some_and(|short| abbreviations.contains(&short))
+            })
+        });
+    let Some(manifest) = manifest else {
+        // A directory with an executable is not safe to back up as a save folder.
+        if is_installation {
+            result.paths = fallback::save_rules(folder, platform);
+        }
+        return (result, None);
+    };
     result.paths = manifest.paths.clone();
-    for rule in &mut result.paths {
-        if let Some(tail) = rule.pattern.strip_prefix("<base>/") {
-            rule.pattern = format!("{}/{tail}", crate::paths::literal_save_pattern(&folder));
-        }
-    }
+    bind_installation_rules(&mut result, folder);
     result.portability = manifest.portability.clone();
+    result.ids = manifest.ids.clone();
     if platform == Platform::Linux {
-        let mut prefixes = HashSet::new();
-        for rule in result.paths.iter().filter(|r| r.os == Os::Linux) {
-            let Some(rest) = rule.pattern.strip_prefix("<steamCompat>/") else {
-                continue;
-            };
-            let Some((_, tail)) = rest.split_once('/') else {
-                continue;
-            };
-            for root in &roots.steam_libraries {
-                let pattern = format!(
-                    "{}/steamapps/compatdata/*/{tail}",
-                    glob::Pattern::escape(&root.to_string_lossy().replace('\\', "/"))
-                );
-                if let Ok(paths) = glob::glob(&pattern) {
-                    let compat = root.join("steamapps/compatdata");
-                    for path in paths.flatten() {
-                        if let Ok(relative) = path.strip_prefix(&compat) {
-                            if let Some(id) = relative.components().next() {
-                                prefixes.insert(id.as_os_str().to_string_lossy().to_string());
-                            }
-                        }
-                    }
-                }
+        prefixes::resolve(
+            &mut result.paths,
+            folder,
+            roots,
+            shortcut.map(|entry| (entry.app_id.as_str(), entry.options.as_str())),
+        );
+    }
+    if is_installation {
+        result.paths.extend(fallback::save_rules(folder, platform));
+    }
+    (result, Some(manifest.slug.clone()))
+}
+
+pub(crate) fn bind_installation_rules(manifest: &mut Manifest, folder: &Path) {
+    for rule in &mut manifest.paths {
+        let relative = rule.pattern.strip_prefix("<base>/").or_else(|| {
+            rule.pattern
+                .strip_prefix("<steamInstall>/")?
+                .split_once('/')
+                .map(|(_, tail)| tail)
+        });
+        if let Some(tail) = relative {
+            if !tail.split('/').any(|part| part == "..") {
+                rule.location
+                    .get_or_insert_with(|| format!("install/{tail}"));
+                rule.pattern = format!("{}/{tail}", crate::paths::literal_save_pattern(folder));
             }
-        }
-        if let Some(id) = shortcut.as_ref().map(|s| &s.1).or_else(|| {
-            if prefixes.len() == 1 {
-                prefixes.iter().next()
-            } else {
-                None
-            }
-        }) {
-            for rule in result.paths.iter_mut().filter(|r| r.os == Os::Linux) {
-                if let Some(rest) = rule.pattern.strip_prefix("<steamCompat>/") {
-                    if let Some((_, tail)) = rest.split_once('/') {
-                        rule.pattern = format!("<steamCompat>/{id}/{tail}");
-                    }
-                }
-            }
-        } else if prefixes.len() > 1 {
-            result
-                .paths
-                .retain(|rule| rule.os != Os::Linux || !rule.pattern.starts_with("<steamCompat>/"));
         }
     }
-    result
+}
+
+fn match_name<'a>(
+    db: &'a ManifestDb,
+    fallback: &'a ManifestDb,
+    matches: impl Fn(&str) -> bool,
+) -> Option<&'a Manifest> {
+    let mut known = db.iter().chain(fallback.iter()).filter(|manifest| {
+        !manifest.slug.starts_with("custom:")
+            && (matches(&manifest.slug)
+                || matches(&slugify(&manifest.name))
+                || manifest
+                    .aliases
+                    .iter()
+                    .any(|alias| matches(&slugify(alias))))
+    });
+    let matched = known.next()?;
+    (!known.any(|other| other.slug != matched.slug)).then_some(matched)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::manifest::{parse_manifest_str, PathRule};
+    use crate::manifest::{parse_manifest_str, Os, PathRule};
 
     #[test]
     fn steam_shortcut_links_arbitrary_display_name_to_its_prefix() {
@@ -225,6 +390,9 @@ mod tests {
             crate::paths::canonical_path(&found[0].locations[0].hits[0]),
             crate::paths::canonical_path(&saves.join("slot"))
         );
+        let discovered = discover_steam_shortcuts(&ManifestDb::default(), &roots, Platform::Linux);
+        assert_eq!(discovered.len(), 1);
+        assert_eq!(discovered[0].slug, "red-dead-redemption-2");
     }
 
     #[test]
@@ -260,6 +428,72 @@ mod tests {
             crate::paths::canonical_path(&found[0].locations[0].hits[0]),
             crate::paths::canonical_path(&folder.join("140.sav"))
         );
+    }
+
+    #[test]
+    fn uses_database_profile_rule_in_installation_and_multiple_linux_prefixes() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("Downloads/portable release");
+        let root = dir.path().join("steam");
+        let card = dir.path().join("sd card");
+        let home = dir.path().join("home");
+        let paths = [
+            folder.join("portable/Profiles/player/SRDR30000"),
+            root.join("steamapps/compatdata/1174180/pfx/drive_c/users/steamuser/Documents/Rockstar Games/Red Dead Redemption 2/Profiles/player/SRDR30001"),
+            card.join("steamapps/compatdata/2147483768/pfx/drive_c/users/other/My Documents/rockstar games/Red Dead Redemption 2/Profiles/player/SRDR30002"),
+            home.join(".wine/drive_c/users/deck/Documents/Rockstar Games/Red Dead Redemption 2/Profiles/player/SRDR30003"),
+        ];
+        for path in &paths {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, b"save").unwrap();
+        }
+        std::fs::write(folder.join("game.exe"), b"binary").unwrap();
+        let custom = Manifest::custom(
+            "rdr2",
+            vec![PathRule {
+                location: None,
+                pattern: crate::paths::literal_save_pattern(&folder),
+                os: Os::Linux,
+                tags: vec![],
+            }],
+        )
+        .unwrap();
+        let roots = Roots {
+            steam_libraries: vec![root, card],
+            home: Some(home),
+            ..Roots::default()
+        };
+        let resolved = resolve_custom(&custom, &ManifestDb::default(), &roots, Platform::Linux);
+        let found = crate::scanner::scan(
+            &ManifestDb::from_entries(vec![resolved]),
+            Platform::Linux,
+            &roots,
+        );
+        assert_eq!(found.len(), 1);
+        let actual: HashSet<_> = found[0]
+            .locations
+            .iter()
+            .flat_map(|location| &location.hits)
+            .map(|hit| crate::paths::canonical_path(hit))
+            .collect();
+        assert_eq!(
+            actual,
+            paths
+                .iter()
+                .map(|path| crate::paths::canonical_path(path))
+                .collect()
+        );
+        assert!(found[0]
+            .locations
+            .iter()
+            .any(|location| location.pattern.starts_with("<steamCompat>/1174180/")));
+        crate::snapshot::create(
+            &custom.slug,
+            "deck",
+            &found[0].locations,
+            &dir.path().join("snapshot.zip"),
+        )
+        .unwrap();
     }
 
     #[test]

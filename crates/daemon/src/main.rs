@@ -120,6 +120,13 @@ fn cmd_via_daemon_or_direct(method: Method) -> i32 {
         Method::Shutdown => rt.prepare_shutdown(),
         Method::Scan => rt.scan(),
         Method::ReloadManifests => rt.reload_manifests(),
+        Method::AddCustomGame { name, paths } => match rt.add_custom_game(name, paths) {
+            Ok(payload) => payload,
+            Err(error) => {
+                eprintln!("ошибка: {error}");
+                return 1;
+            }
+        },
         Method::SetGameHidden { game_key, hidden } => rt.set_game_hidden(game_key, *hidden),
         Method::Lan { action } => rt.lan_action(action.clone()),
         Method::OAuthBegin { provider } => rt.oauth_begin(*provider),

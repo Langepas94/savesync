@@ -26,7 +26,11 @@ fn convert(game: &Game, installed: &HashSet<u32>) -> Option<Manifest> {
     for (source, systems) in &game.files {
         let path = source
             .replace("<storeUserId>", "*")
-            .replace("<osUserName>", "*");
+            .replace("<osUserName>", "*")
+            .replace("<winLocalAppData>Low", "<winLocalAppDataLow>")
+            .replace("<winLocalAppData>low", "<winLocalAppDataLow>")
+            .replace("<home>/AppData/LocalLow/", "<winLocalAppDataLow>/")
+            .replace("<home>/Saved Games/", "<winSavedGames>/");
         let windows = systems.is_empty() || systems.iter().any(|os| os == "windows");
         let linux = systems.is_empty() || systems.iter().any(|os| os == "linux");
         let win = [
@@ -73,6 +77,29 @@ fn convert(game: &Game, installed: &HashSet<u32>) -> Option<Manifest> {
                     tags: vec!["save".into()],
                 });
             }
+        } else if let Some(tail) = path.strip_prefix("<root>/userdata/") {
+            let Some((account, remaining)) = tail.split_once('/') else {
+                continue;
+            };
+            let (id, relative) = remaining.split_once('/').unwrap_or((remaining, ""));
+            if account != "*"
+                || id.parse::<u32>().is_err()
+                || relative.contains('<')
+                || relative.split('/').any(|part| part == "..")
+            {
+                continue;
+            }
+            let relative = if relative.is_empty() {
+                "remote"
+            } else {
+                relative
+            };
+            paths.push(PathRule {
+                location: None,
+                pattern: format!("<steamUserdata>/*/{id}/{relative}"),
+                os: Os::Any,
+                tags: vec!["save".into()],
+            });
         } else if let Some(tail) = path.strip_prefix("<base>/") {
             if !tail.contains('<') && !tail.split('/').any(|part| part == "..") {
                 for os in [Os::Windows, Os::Linux] {
@@ -107,6 +134,7 @@ fn convert(game: &Game, installed: &HashSet<u32>) -> Option<Manifest> {
         schema: 1,
         name: game.name.clone(),
         slug: slugify(&game.name),
+        catalog_key: None,
         aliases: game.aliases.clone(),
         ids: Ids {
             steam: game.ids.clone(),
@@ -119,16 +147,27 @@ fn convert(game: &Game, installed: &HashSet<u32>) -> Option<Manifest> {
 }
 
 pub fn add_matching(db: &mut ManifestDb, ids: &HashSet<u32>, names: &HashSet<String>) {
+    add_matching_where(db, ids, |name| names.contains(&slugify(name)));
+}
+
+pub(crate) fn add_installation_matches(db: &mut ManifestDb, names: &HashSet<String>) {
+    use crate::game_key::title_initials;
+    let short_names: HashSet<_> = names.iter().map(|name| name.replace('-', "")).collect();
+    add_matching_where(db, &HashSet::new(), |name| {
+        let slug = slugify(name);
+        names.contains(&slug)
+            || title_initials(&slug).is_some_and(|short| short_names.contains(&short))
+    });
+}
+
+fn add_matching_where(db: &mut ManifestDb, ids: &HashSet<u32>, matches: impl Fn(&str) -> bool) {
     for game in database() {
         if !game
             .ids
             .iter()
             .any(|id| id.parse::<u32>().is_ok_and(|id| ids.contains(&id)))
-            && !names.contains(&slugify(&game.name))
-            && !game
-                .aliases
-                .iter()
-                .any(|name| names.contains(&slugify(name)))
+            && !matches(&game.name)
+            && !game.aliases.iter().any(|name| matches(name))
         {
             continue;
         }

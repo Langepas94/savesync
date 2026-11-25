@@ -132,6 +132,10 @@ fn dispatch(
         Method::Status => rt.status(),
         Method::Scan => rt.scan(),
         Method::ReloadManifests => rt.reload_manifests(),
+        Method::AddCustomGame { name, paths } => match rt.add_custom_game(name, paths) {
+            Ok(payload) => payload,
+            Err(error) => return Response::err(req.id, error),
+        },
         Method::SetGameHidden { game_key, hidden } => rt.set_game_hidden(game_key, *hidden),
         Method::Lan { action } => rt.lan_action(action.clone()),
         Method::OAuthBegin { provider } => rt.oauth_begin(*provider),
@@ -186,6 +190,7 @@ mod tests {
         Runtime {
             shutdown_requested: false,
             config,
+            base_manifests: Default::default(),
             manifests: Default::default(),
             platform: savesync_core::paths::Platform::current(),
             roots: Default::default(),
@@ -238,6 +243,36 @@ mod tests {
             other => panic!("unexpected: {other:?}"),
         }
 
+        let save = dir.join("initial.sav");
+        let replacement = dir.join("replacement.sav");
+        std::fs::write(&save, b"initial save").unwrap();
+        std::fs::write(&replacement, b"replacement save").unwrap();
+        let add = |path: &std::path::Path| Method::AddCustomGame {
+            name: "Readded Game".into(),
+            paths: vec![path.to_string_lossy().into_owned()],
+        };
+        let key = "custom:readded-game";
+        for (method, count) in [
+            (add(&save), 1),
+            (
+                Method::SetGameHidden {
+                    game_key: key.into(),
+                    hidden: true,
+                },
+                0,
+            ),
+            (add(&replacement), 1),
+        ] {
+            let response = call(&name, Request::new(3, method)).unwrap();
+            assert!(
+                matches!(response.result, Some(ResponsePayload::Scan(scan)) if scan.found == count)
+            );
+        }
+        let response = call(&name, Request::new(4, Method::Status)).unwrap();
+        assert!(
+            matches!(response.result, Some(ResponsePayload::Status(status))
+            if status.hidden_games.is_empty() && status.games[0].game_key == key && status.games[0].state == "no_versions")
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 

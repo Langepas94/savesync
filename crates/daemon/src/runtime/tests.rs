@@ -40,7 +40,8 @@ impl World {
                 },
                 backups: Default::default(),
             },
-            manifests: ManifestDb::from_entries(vec![manifest]),
+            base_manifests: ManifestDb::from_entries(vec![manifest]),
+            manifests: ManifestDb::default(),
             platform: Platform::Windows,
             roots: Roots {
                 home: Some(home),
@@ -221,7 +222,7 @@ fn sync_rescans_globs_after_initial_scan() {
     let world = World::new("rescan-globs");
     let mut pc = world.device("pc");
     let manifest = parse_manifest_str("schema: 1\nname: Test Game\nslug: test-game\npaths:\n - pattern: '<home>/game/saves/*.sav'\n").unwrap();
-    pc.manifests = ManifestDb::from_entries(vec![manifest]);
+    pc.base_manifests = ManifestDb::from_entries(vec![manifest]);
     pc.scan();
     pc.sync(None);
     std::fs::write(
@@ -285,6 +286,8 @@ fn discovers_ufs_from_secondary_library_and_pulls_without_local_saves() {
     let world = World::new("steam-empty");
     let mut pc = world.device("pc");
     let mut deck = world.device("deck");
+    pc.platform = Platform::Linux;
+    deck.platform = Platform::Linux;
     let steam = world.dir.join("steam");
     let secondary = world.dir.join("secondary");
     std::fs::create_dir_all(steam.join("steamapps")).unwrap();
@@ -308,8 +311,8 @@ fn discovers_ufs_from_secondary_library_and_pulls_without_local_saves() {
     .unwrap();
     pc.roots.steam_libraries = vec![steam.clone()];
     deck.roots.steam_libraries = vec![steam];
-    pc.manifests = ManifestDb::default();
-    deck.manifests = ManifestDb::default();
+    pc.base_manifests = ManifestDb::default();
+    deck.base_manifests = ManifestDb::default();
     deck.scan();
     assert_eq!(deck.last_scan.len(), 1);
     assert_eq!(deck.last_scan[0].game_key, "auto-game");
@@ -340,13 +343,49 @@ fn discovers_ufs_from_secondary_library_and_pulls_without_local_saves() {
 }
 
 #[test]
+fn installed_steam_game_resolves_save_rules_inside_its_library() {
+    let world = World::new("steam-install-directory");
+    let mut deck = world.device("deck");
+    deck.platform = Platform::Linux;
+    let steam = world.dir.join("sd card [games]");
+    let save = steam.join("steamapps/common/Sample Install [test]/saves/slot.sav");
+    std::fs::create_dir_all(save.parent().unwrap()).unwrap();
+    std::fs::write(&save, b"portable progress").unwrap();
+    std::fs::write(steam.join("steamapps/appmanifest_12345678.acf"),
+        r#""AppState" { "appid" "12345678" "name" "Sample Install" "installdir" "Sample Install [test]" }"#).unwrap();
+    deck.base_manifests = ManifestDb::from_entries(vec![parse_manifest_str(
+        "schema: 1\nname: Sample Install\nslug: sample-install\nids:\n  steam: ['12345678']\npaths:\n  - pattern: '<base>/saves/*.sav'\n",
+    ).unwrap()]);
+    deck.roots.steam_libraries = vec![steam];
+    deck.scan();
+    let game = deck
+        .last_scan
+        .iter()
+        .find(|game| game.game_key == "sample-install")
+        .unwrap();
+    assert_eq!(game.locations.len(), 1);
+    assert_eq!(
+        game.locations[0]
+            .hits
+            .iter()
+            .map(|hit| savesync_core::paths::canonical_path(hit))
+            .collect::<Vec<_>>(),
+        [savesync_core::paths::canonical_path(&save)]
+    );
+    assert_eq!(
+        sync_results(deck.sync(Some("sample-install")))[0].outcome,
+        "uploaded"
+    );
+}
+
+#[test]
 fn empty_save_directory_does_not_create_snapshot() {
     let world = World::new("empty-directory");
     let mut pc = world.device("pc");
     std::fs::remove_file(world.dir.join("pc/home/game/saves/slot1.sav")).unwrap();
-    let mut manifest = pc.manifests.get("test-game").unwrap().clone();
+    let mut manifest = pc.base_manifests.get("test-game").unwrap().clone();
     manifest.slug = "custom:test-game".into();
-    pc.manifests = ManifestDb::from_entries(vec![manifest]);
+    pc.base_manifests = ManifestDb::from_entries(vec![manifest]);
     assert_eq!(sync_results(pc.sync(None))[0].outcome, "no_saves");
     assert!(!world.dir.join("remote/saves").exists());
 }
@@ -355,12 +394,12 @@ fn empty_save_directory_does_not_create_snapshot() {
 fn blocked_manifest_never_uploads_save_files() {
     let world = World::new("blocked-discovery");
     let mut pc = world.device("pc");
-    let mut manifest = pc.manifests.get("test-game").unwrap().clone();
+    let mut manifest = pc.base_manifests.get("test-game").unwrap().clone();
     manifest.portability = savesync_core::manifest::Portability {
         status: savesync_core::manifest::PortabilityStatus::Blocked,
         reason: Some("machine bound".into()),
     };
-    pc.manifests = ManifestDb::from_entries(vec![manifest]);
+    pc.base_manifests = ManifestDb::from_entries(vec![manifest]);
     assert_eq!(sync_results(pc.sync(None))[0].outcome, "skipped");
     assert!(!world.dir.join("remote/saves").exists());
 }
@@ -384,7 +423,7 @@ fn partial_ufs_keeps_curated_fallback_and_deduplicates_overlapping_files() {
     .unwrap();
     pc.roots.steam_libraries = vec![steam.clone(), steam];
     let manifest=parse_manifest_str("schema: 1\nname: Canonical\nslug: canonical\nids:\n steam: ['777001']\npaths:\n - pattern: '<home>/ufs-saves'\n   location: legacy\n - pattern: '<home>/extra/*.sav'\n   location: extra\n").unwrap();
-    pc.manifests = ManifestDb::from_entries(vec![manifest]);
+    pc.base_manifests = ManifestDb::from_entries(vec![manifest]);
     let home = pc.roots.home.as_ref().unwrap();
     for directory in ["ufs-saves", "extra"] {
         std::fs::create_dir_all(home.join(directory)).unwrap();
@@ -486,4 +525,173 @@ fn hidden_game_stays_excluded_until_restored() {
         ResponsePayload::Scan(_)
     ));
     assert_eq!(restarted.last_scan.len(), 1);
+}
+
+#[test]
+fn readding_hidden_custom_game_replaces_paths_and_clears_hidden_state() {
+    let world = World::new("readd-custom-game");
+    let mut rt = world.device("pc");
+    let home = rt.roots.home.clone().unwrap();
+    let old = home.join("game/saves/slot1.sav");
+    let new = home.join("new-save.sav");
+    std::fs::write(&new, b"new save").unwrap();
+    let input = |path: &std::path::Path| [path.to_string_lossy().into_owned()];
+    let key = "custom:my-custom-game";
+
+    assert!(rt.add_custom_game("My Custom Game", &input(&old)).is_ok());
+    assert!(rt.add_custom_game("My Custom Game", &input(&new)).is_err());
+    assert!(matches!(
+        rt.set_game_hidden(key, true),
+        ResponsePayload::Scan(_)
+    ));
+    assert!(rt
+        .add_custom_game("My Custom Game", &input(&home.join("missing")))
+        .is_err());
+    assert!(rt.hidden_games.contains_key(key));
+
+    assert!(matches!(
+        rt.add_custom_game("My Custom Game", &input(&new)).unwrap(),
+        ResponsePayload::Scan(_)
+    ));
+    let game = rt
+        .last_scan
+        .iter()
+        .find(|game| game.game_key == key)
+        .unwrap();
+    assert_eq!(
+        game.locations[0]
+            .hits
+            .iter()
+            .map(|path| savesync_core::paths::canonical_path(path))
+            .collect::<Vec<_>>(),
+        [savesync_core::paths::canonical_path(&new)]
+    );
+    assert_eq!(std::fs::read_to_string(&old).unwrap(), "save of pc");
+    assert!(!rt.hidden_games.contains_key(key));
+    let restarted = Runtime::new(rt.config.clone(), rt.state_dir.clone()).unwrap();
+    assert!(!restarted.hidden_games.contains_key(key));
+    assert!(restarted.last_scan.iter().any(|game| game.game_key == key));
+}
+
+#[test]
+fn portable_linux_game_and_windows_steam_game_share_progress_over_quic() {
+    use savesync_core::{config::LanConfig, lan};
+    let world = World::new("cross-platform-quic");
+    let mut deck = world.device("deck");
+    let mut pc = world.device("pc");
+    let manifest = parse_manifest_str("schema: 1\nname: Sample Adventure\nslug: sample-adventure\naliases: [Adventure Shortcut]\nids:\n  steam: ['12345678']\npaths:\n  - pattern: '<documents>/Publisher/Sample Adventure/Saves/*.sav'\n    os: windows\n  - pattern: '<steamCompat>/12345678/pfx/drive_c/users/steamuser/Documents/Publisher/Sample Adventure/Saves/*.sav'\n    os: linux\n").unwrap();
+    deck.base_manifests = ManifestDb::from_entries(vec![manifest.clone()]);
+    pc.base_manifests = ManifestDb::from_entries(vec![manifest]);
+    deck.platform = Platform::Linux;
+    let install = world.dir.join("deck/home/Downloads/Sample Adventure");
+    let prefix = world.dir.join("relocated-wine-prefix");
+    let linux_save =
+        prefix.join("drive_c/users/deck/My Documents/Publisher/Sample Adventure/Saves/slot.sav");
+    let pc_docs = world.dir.join("pc/home/Documents");
+    let windows_save = pc_docs.join("Publisher/Sample Adventure/Saves/slot.sav");
+    let steam = world.dir.join("steam-pc");
+    let lutris_config = world.dir.join("deck/home/.config/lutris/games");
+    for directory in [
+        install.as_path(),
+        linux_save.parent().unwrap(),
+        windows_save.parent().unwrap(),
+        lutris_config.as_path(),
+        steam.join("steamapps").as_path(),
+    ] {
+        std::fs::create_dir_all(directory).unwrap();
+    }
+    let exe = install.join("game.exe");
+    std::fs::write(&exe, b"executable").unwrap();
+    let lutris_yaml = serde_json::json!({"game": {"exe": exe, "prefix": prefix}});
+    std::fs::write(
+        lutris_config.join("sample-adventure.yml"),
+        lutris_yaml.to_string(),
+    )
+    .unwrap();
+    std::fs::write(&linux_save, b"progress from Linux").unwrap();
+    std::fs::write(steam.join("steamapps/appmanifest_12345678.acf"),
+        r#""AppState" { "appid" "12345678" "name" "Sample Adventure" "installdir" "Sample Adventure" }"#).unwrap();
+    pc.roots.documents = Some(pc_docs);
+    pc.roots.steam_libraries.push(steam);
+    let added = deck
+        .add_custom_game(
+            "Adventure Shortcut",
+            &[install.to_string_lossy().into_owned()],
+        )
+        .unwrap();
+    let key = "sample-adventure";
+    assert!(
+        matches!(added, ResponsePayload::Scan(scan) if scan.games.iter().any(|game| game.game_key == key && game.locations == 1))
+    );
+
+    let server_identity = deck.state_dir.join("lan-identity");
+    let pc_identity = pc.state_dir.join("lan-identity");
+    let server =
+        lan::LanServer::start_with_identity(deck.lan_store(), 0, &server_identity, false).unwrap();
+    let address = format!("127.0.0.1:{}", server.port);
+    server.open_pairing("123456").unwrap();
+    let offer = lan::pair(&pc_identity, &address, "123456").unwrap();
+    let peer = lan::peers(&server_identity).unwrap().remove(0);
+    assert_eq!(peer.sas.as_deref(), Some(offer.sas.as_str()));
+    lan::confirm(&pc_identity, &offer.peer_id).unwrap();
+    lan::confirm(&server_identity, &peer.peer.id).unwrap();
+    deck.config.backends = BackendsConfig {
+        lan: Some(LanConfig {
+            port: server.port,
+            pin: String::new(),
+            peers: vec![],
+        }),
+        ..Default::default()
+    };
+    pc.config.backends = BackendsConfig {
+        lan: Some(LanConfig {
+            port: 0,
+            pin: String::new(),
+            peers: vec![address],
+        }),
+        ..Default::default()
+    };
+
+    assert_eq!(sync_results(deck.sync(Some(key)))[0].outcome, "uploaded");
+    let results = sync_results(pc.sync(Some(key)));
+    assert!(
+        results.iter().any(|result| result.outcome == "applied"),
+        "{results:?}"
+    );
+    assert_eq!(
+        std::fs::read(&windows_save).unwrap(),
+        b"progress from Linux"
+    );
+
+    std::fs::write(&windows_save, b"progress from Windows").unwrap();
+    let results = sync_results(pc.sync(Some(key)));
+    assert!(
+        results
+            .iter()
+            .all(|result| matches!(result.outcome.as_str(), "uploaded" | "up_to_date")),
+        "{results:?}"
+    );
+    let results = sync_results(deck.sync(Some(key)));
+    assert_eq!(results[0].outcome, "applied", "{results:?}");
+    assert_eq!(
+        std::fs::read(&linux_save).unwrap(),
+        b"progress from Windows"
+    );
+
+    assert!(matches!(
+        deck.set_game_hidden(key, true),
+        ResponsePayload::Scan(_)
+    ));
+    let result = deck
+        .add_custom_game(
+            "Adventure Shortcut",
+            &[linux_save.to_string_lossy().into_owned()],
+        )
+        .unwrap();
+    assert!(
+        matches!(result, ResponsePayload::Scan(scan) if scan.games.iter().any(|game| game.game_key == key && game.locations == 1))
+    );
+    assert!(
+        matches!(deck.status(), ResponsePayload::Status(status) if status.games.iter().any(|game| game.game_key == key && game.versions > 0))
+    );
 }

@@ -18,6 +18,7 @@ use savesync_core::scanner::{self, FoundGame};
 pub struct Runtime {
     pub shutdown_requested: bool,
     pub config: Config,
+    pub(crate) base_manifests: ManifestDb,
     pub manifests: ManifestDb,
     pub platform: Platform,
     pub roots: Roots,
@@ -58,16 +59,6 @@ impl Runtime {
                 manifests.insert(manifest.clone());
             }
         }
-        let custom_dir = state_dir.join("custom");
-        if custom_dir.is_dir() {
-            let (custom_db, errors) = savesync_core::manifest::load_manifest_tree(&custom_dir);
-            for e in &errors {
-                eprintln!("custom manifest load warning: {e}");
-            }
-            for m in custom_db.iter() {
-                manifests.insert(m.clone());
-            }
-        }
         let platform = Platform::current();
         let roots = Roots::detect(platform);
         let hidden_games = match std::fs::read(state_dir.join("hidden-games.json")) {
@@ -78,7 +69,8 @@ impl Runtime {
         let mut runtime = Runtime {
             shutdown_requested: false,
             config,
-            manifests,
+            base_manifests: manifests,
+            manifests: ManifestDb::default(),
             platform,
             roots,
             state_dir,

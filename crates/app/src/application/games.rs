@@ -1,63 +1,11 @@
 use super::*;
-use savesync_core::manifest::{Manifest, Os, PathRule};
-use savesync_core::paths::{literal_save_pattern, Platform};
-use std::path::Path;
 
 #[derive(Default)]
 pub(super) struct AddGameForm {
     name: String,
     paths: String,
-    error: Option<String>,
+    pub(super) error: Option<String>,
     picker: Option<std::sync::mpsc::Receiver<Option<std::path::PathBuf>>>,
-}
-
-impl AddGameForm {
-    fn save(&self) -> Result<(), String> {
-        let platform = Platform::current();
-        let os = match platform {
-            Platform::Windows => Os::Windows,
-            Platform::Linux => Os::Linux,
-        };
-        let rules = self
-            .paths
-            .lines()
-            .map(str::trim)
-            .filter(|line| !line.is_empty())
-            .map(|line| {
-                let path = Path::new(
-                    line.strip_prefix('"')
-                        .and_then(|p| p.strip_suffix('"'))
-                        .unwrap_or(line),
-                );
-                if !path.is_absolute()
-                    || path.parent().is_none()
-                    || !(path.is_file() || path.is_dir())
-                {
-                    return Err(format!(
-                        "Укажите существующий файл или папку сохранений: {line}"
-                    ));
-                }
-                Ok(PathRule {
-                    location: None,
-                    pattern: literal_save_pattern(path),
-                    os,
-                    tags: vec!["save".into()],
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let manifest = Manifest::custom(self.name.trim(), rules)
-            .map_err(|_| "Проверьте название игры и пути сохранений".to_string())?;
-        let directory = savesync_core::config::data_dir(platform)
-            .ok_or_else(|| "Папка данных SaveSync недоступна".to_string())?
-            .join("state/custom");
-        manifest.save_new_custom(&directory).map_err(|error| {
-            if error.kind() == std::io::ErrorKind::AlreadyExists {
-                "Игра с таким названием уже добавлена вручную".into()
-            } else {
-                format!("Не удалось сохранить правило: {error}")
-            }
-        })
-    }
 }
 
 impl SaveSyncApp {
@@ -246,6 +194,7 @@ impl SaveSyncApp {
 
     fn view_add_game(&mut self, ui: &mut egui::Ui) {
         let can_save = self.daemon_ok && !self.busy();
+        let submitting = self.job.as_ref().is_some_and(|job| job.adding_game);
         let Some(form) = &mut self.add_game else {
             return;
         };
@@ -270,6 +219,9 @@ impl SaveSyncApp {
             }
         }
         egui::Frame::group(ui.style()).show(ui, |ui| {
+            if submitting {
+                ui.disable();
+            }
             ui.label("Название игры");
             ui.add(egui::TextEdit::singleline(&mut form.name).desired_width(420.0));
             ui.label("Папка игры или файлы сохранений");
@@ -309,17 +261,28 @@ impl SaveSyncApp {
         if cancelled {
             self.add_game = None;
         } else if submitted {
-            match form.save() {
-                Ok(()) => {
-                    self.add_game = None;
-                    self.start_job(
-                        "Добавление игры…",
-                        Method::ReloadManifests,
-                        |_| ("Игра добавлена".into(), true, false),
-                    );
-                }
-                Err(error) => form.error = Some(error),
-            }
+            let name = form.name.trim().to_string();
+            let game_key = savesync_core::game_key::custom_key(&name);
+            let display_name = name.clone();
+            let paths = form
+                .paths
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(|line| {
+                    line.strip_prefix('"')
+                        .and_then(|p| p.strip_suffix('"'))
+                        .unwrap_or(line)
+                        .to_string()
+                })
+                .collect();
+            form.error = None;
+            self.start_job("Добавление игры…", Method::AddCustomGame { name, paths }, move |payload| {
+                let no_saves = matches!(payload, ResponsePayload::Scan(scan)
+                    if scan.games.iter().any(|game| (game.game_key == game_key || game.display_name == display_name) && game.locations == 0));
+                let message = if no_saves { "Игра добавлена. Сохранения не найдены." } else { "Игра добавлена" };
+                (message.into(), true, false)
+            });
         }
     }
 

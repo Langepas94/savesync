@@ -38,6 +38,9 @@ pub struct Manifest {
     pub name: String,
     /// Каноничный slug = `game_key`; обязан совпадать с именем файла.
     pub slug: String,
+    /// The catalog identity previously confirmed for a local custom rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub catalog_key: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub aliases: Vec<String>,
     #[serde(default, skip_serializing_if = "Ids::is_empty")]
@@ -149,6 +152,7 @@ impl Manifest {
             schema: SCHEMA_VERSION,
             name: name.to_string(),
             slug: crate::game_key::custom_key(name),
+            catalog_key: None,
             aliases: Vec::new(),
             ids: Ids::default(),
             paths,
@@ -170,6 +174,10 @@ impl Manifest {
 
     /// Publish a new local rule without replacing an existing rule with the same slug.
     pub fn save_new_custom(&self, directory: &std::path::Path) -> std::io::Result<()> {
+        self.write_custom(directory, false)
+    }
+
+    pub fn write_custom(&self, directory: &std::path::Path, replace: bool) -> std::io::Result<()> {
         use std::io::{self, Write};
 
         let slug = self
@@ -182,8 +190,13 @@ impl Manifest {
         let mut file = tempfile::NamedTempFile::new_in(directory)?;
         file.write_all(yaml.as_bytes())?;
         file.as_file().sync_all()?;
-        file.persist_noclobber(directory.join(format!("{slug}.yaml")))
-            .map_err(|error| error.error)?;
+        let target = directory.join(format!("{slug}.yaml"));
+        if replace {
+            file.persist(target)
+        } else {
+            file.persist_noclobber(target)
+        }
+        .map_err(|error| error.error)?;
         Ok(())
     }
 
@@ -202,6 +215,11 @@ impl Manifest {
                 .is_some_and(crate::game_key::is_valid_slug);
         if !slug_ok {
             errors.push(format!("invalid slug {:?}", self.slug));
+        }
+        if self.catalog_key.as_ref().is_some_and(|key| {
+            !self.slug.starts_with("custom:") || !crate::game_key::is_valid_slug(key)
+        }) {
+            errors.push("invalid custom catalog identity".into());
         }
         if self.name.trim().is_empty() {
             errors.push("empty name".into());
@@ -230,7 +248,7 @@ impl Manifest {
 }
 
 /// Загруженная база манифестов, ключ — slug.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct ManifestDb {
     entries: Vec<Manifest>,
 }
@@ -242,8 +260,12 @@ impl ManifestDb {
 
     /// Добавляет манифест, заменяя существующий с тем же slug.
     pub fn insert(&mut self, m: Manifest) {
-        self.entries.retain(|e| e.slug != m.slug);
+        self.remove(&m.slug);
         self.entries.push(m);
+    }
+
+    pub fn remove(&mut self, slug: &str) {
+        self.entries.retain(|entry| entry.slug != slug);
     }
 
     pub fn len(&self) -> usize {

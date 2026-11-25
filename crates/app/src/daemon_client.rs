@@ -70,7 +70,10 @@ pub(crate) fn validate_result(
         )
         | (Method::Status, ResponsePayload::Status(_))
         | (
-            Method::Scan | Method::ReloadManifests | Method::SetGameHidden { .. },
+            Method::Scan
+            | Method::ReloadManifests
+            | Method::AddCustomGame { .. }
+            | Method::SetGameHidden { .. },
             ResponsePayload::Scan(_),
         )
         | (Method::History { .. }, ResponsePayload::History(_))

@@ -32,6 +32,7 @@ struct JobDone {
 struct Job {
     rx: mpsc::Receiver<JobDone>,
     desc: String,
+    adding_game: bool,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy)]
@@ -181,6 +182,7 @@ impl SaveSyncApp {
     {
         let (tx, rx) = mpsc::channel();
         let client = self.client.clone();
+        let adding_game = matches!(&method, Method::AddCustomGame { .. });
         std::thread::spawn(move || {
             let lan_config_only = matches!(&method, Method::Lan { .. });
             let mut saved_config = None;
@@ -295,6 +297,7 @@ impl SaveSyncApp {
         self.job = Some(Job {
             rx,
             desc: desc.to_string(),
+            adding_game,
         });
     }
 
@@ -562,11 +565,21 @@ impl eframe::App for SaveSyncApp {
         let mut job_done = None;
         if let Some(job) = &self.job {
             if let Ok(done) = job.rx.try_recv() {
-                job_done = Some(done);
+                job_done = Some((done, job.adding_game));
             }
         }
-        if let Some(done) = job_done {
+        if let Some((done, adding_game)) = job_done {
             self.job = None;
+            if adding_game {
+                match &done.msg {
+                    Ok(_) => self.add_game = None,
+                    Err(error) => {
+                        if let Some(form) = &mut self.add_game {
+                            form.error = Some(error.clone());
+                        }
+                    }
+                }
+            }
             if let Some(provider) = done.oauth_started {
                 self.oauth_pending = Some(provider);
             }

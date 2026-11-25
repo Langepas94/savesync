@@ -47,6 +47,8 @@ pub struct Roots {
     /// Корни Steam-библиотек (для Proton-маппинга `<steamCompat>`):
     /// `<lib>/steamapps/compatdata/<appid>/...`.
     pub steam_libraries: Vec<PathBuf>,
+    /// Game installation directory by Steam application ID.
+    pub steam_installations: std::collections::BTreeMap<u32, PathBuf>,
 }
 
 impl Roots {
@@ -117,6 +119,51 @@ pub fn resolve_pattern_multi(pattern: &str, roots: &Roots) -> Vec<String> {
             .map(|lib| join(lib, &format!("steamapps/compatdata/{rest}")))
             .collect();
     }
+    if placeholder == "steamUserdata" {
+        return roots
+            .steam_libraries
+            .iter()
+            .map(|lib| join(lib, &format!("userdata/{rest}")))
+            .collect();
+    }
+    if placeholder == "steamInstall" {
+        return rest
+            .split_once('/')
+            .and_then(|(id, tail)| {
+                Some((
+                    roots.steam_installations.get(&id.parse::<u32>().ok()?)?,
+                    tail,
+                ))
+            })
+            .map(|(base, tail)| format!("{}/{tail}", literal_save_pattern(base)))
+            .into_iter()
+            .collect();
+    }
+    if placeholder == "steamCloudDocs" {
+        let Some((id, tail)) = rest.split_once('/') else {
+            return Vec::new();
+        };
+        let Some(folder) = id
+            .parse::<u32>()
+            .ok()
+            .and_then(|id| roots.steam_installations.get(&id))
+            .and_then(|path| path.file_name())
+            .and_then(|name| name.to_str())
+        else {
+            return Vec::new();
+        };
+        return roots
+            .home
+            .as_ref()
+            .map(|home| {
+                join(
+                    home,
+                    &format!(".SteamCloud/*/{}/{tail}", glob::Pattern::escape(folder)),
+                )
+            })
+            .into_iter()
+            .collect();
+    }
 
     let root = match placeholder {
         "home" => roots.home.as_ref(),
@@ -130,6 +177,38 @@ pub fn resolve_pattern_multi(pattern: &str, roots: &Roots) -> Vec<String> {
     };
 
     root.map(|r| join(r, rest)).into_iter().collect()
+}
+
+/// Shared representation of a Windows save rule and its Wine/Proton equivalent.
+pub(crate) fn windows_save_pattern(pattern: &str) -> std::borrow::Cow<'_, str> {
+    use std::borrow::Cow;
+    let Some((_, tail)) = pattern
+        .strip_prefix("<steamCompat>/")
+        .and_then(|value| value.split_once('/'))
+    else {
+        return Cow::Borrowed(pattern);
+    };
+    let Some((_, relative)) = tail
+        .strip_prefix("pfx/drive_c/users/")
+        .and_then(|value| value.split_once('/'))
+    else {
+        return Cow::Borrowed(pattern);
+    };
+    [
+        ("AppData/Roaming/", "<winAppData>/"),
+        ("AppData/Local/", "<winLocalAppData>/"),
+        ("AppData/LocalLow/", "<home>/AppData/LocalLow/"),
+        ("Saved Games/", "<winSavedGames>/"),
+        ("Documents/", "<documents>/"),
+        ("My Documents/", "<documents>/"),
+    ]
+    .iter()
+    .find_map(|(prefix, placeholder)| {
+        relative
+            .strip_prefix(prefix)
+            .map(|rest| Cow::Owned(format!("{placeholder}{rest}")))
+    })
+    .unwrap_or(Cow::Borrowed(pattern))
 }
 
 /// Одиночный резолв для паттернов без мульти-корней (тесты, простые вызовы).
@@ -179,12 +258,9 @@ pub fn canonical_path(path: &std::path::Path) -> PathBuf {
 }
 
 pub fn canonical_pattern(resolved: &str) -> String {
-    let base = crate::snapshot::location_base(resolved);
-    let base_text = base.to_string_lossy();
-    let rest = resolved
-        .strip_prefix(base_text.as_ref())
-        .unwrap_or(resolved);
-    let mut canonical = canonical_path(&base).to_string_lossy().replace('\\', "/");
+    let (base, rest) = crate::snapshot::split_location_pattern(resolved);
+    let base = crate::snapshot::unescape_pattern(base);
+    let mut canonical = literal_save_pattern(std::path::Path::new(&base));
     if !canonical.ends_with('/') && !rest.is_empty() {
         canonical.push('/');
     }
@@ -216,7 +292,7 @@ pub fn validate_source_path(base: &std::path::Path, path: &std::path::Path) -> s
 }
 
 fn join(root: &std::path::Path, rest: &str) -> String {
-    let mut s = root.to_string_lossy().replace('\\', "/");
+    let mut s = glob::Pattern::escape(&root.to_string_lossy().replace('\\', "/"));
     if !rest.is_empty() {
         if !s.ends_with('/') {
             s.push('/');

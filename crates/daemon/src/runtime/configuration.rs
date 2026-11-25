@@ -67,7 +67,7 @@ impl Runtime {
             }
         }
         self.config = config;
-        self.manifests = rebuilt.manifests;
+        self.base_manifests = rebuilt.base_manifests;
         self.refresh_catalog();
         Ok(())
     }

@@ -110,7 +110,12 @@ fn collect_regular_files(
     crate::paths::validate_source_path(base, path)?;
     let metadata = std::fs::symlink_metadata(path)?;
     if metadata.is_file() {
-        out.push(path.to_path_buf());
+        if !path
+            .file_name()
+            .is_some_and(|name| name.eq_ignore_ascii_case("steam_autocloud.vdf"))
+        {
+            out.push(path.to_path_buf());
+        }
     } else if metadata.is_dir() {
         for entry in std::fs::read_dir(path)? {
             collect_regular_files(base, &entry?.path(), out)?;

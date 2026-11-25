@@ -1,6 +1,39 @@
 use super::*;
 
 #[test]
+fn rate_limit_error_explains_the_problem() {
+    use std::io::{BufRead, BufReader};
+    use std::net::TcpListener;
+
+    for (headers, expected) in [
+        (
+            "X-RateLimit-Remaining: 0\r\n",
+            "GitHub ограничил число запросов",
+        ),
+        ("", "GitHub Releases вернул HTTP 403"),
+    ] {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            for line in BufReader::new(&stream).lines() {
+                if line.unwrap().is_empty() {
+                    break;
+                }
+            }
+            write!(
+                stream,
+                "HTTP/1.1 403 Forbidden\r\n{headers}Content-Length: 0\r\nConnection: close\r\n\r\n"
+            )
+            .unwrap();
+        });
+        let error = ureq::get(&format!("http://{address}")).call().unwrap_err();
+        assert!(network_error(error).to_string().contains(expected));
+        server.join().unwrap();
+    }
+}
+
+#[test]
 fn release_check_distinguishes_an_empty_release_feed_from_denied_access() {
     use std::io::{BufRead, BufReader};
     use std::net::TcpListener;
