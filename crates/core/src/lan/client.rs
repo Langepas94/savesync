@@ -94,6 +94,15 @@ impl Backend for LanBackend {
     fn get_index(&self) -> io::Result<Option<Vec<u8>>> {
         self.request(Operation::GetIndex, &[]).map(|(_, blob)| blob)
     }
+    fn publish_index(&self, data: &[u8], writer: &str) -> io::Result<()> {
+        self.request(
+            Operation::PublishIndex {
+                writer: writer.into(),
+            },
+            data,
+        )
+        .map(|_| ())
+    }
     fn put_index(&self, data: &[u8]) -> io::Result<()> {
         self.request(Operation::PutIndex, data).map(|_| ())
     }

@@ -5,6 +5,14 @@
 
 ## [Unreleased]
 
+- Preserve concurrent cloud version history with immutable delta publications,
+  no-op suppression and a hash-verified persistent cache; read all listing pages.
+- Merge filesystem/LAN publications under a file lock without reviving stale
+  foreign locks. Preserve original archive bytes for unchanged versions.
+- Use flat content-addressed cloud snapshots and read all duplicate legacy Drive
+  roots; multipart/resumable uploads avoid visible metadata-only publications.
+
+
 - Replace replayable LAN PIN hashes with QUIC/TLS 1.3, SPAKE2 enrollment,
   exporter-bound device authentication and explicit SAS trust on both devices.
 - Add advisory mDNS discovery, short-lived rate-limited invitations, revocation,

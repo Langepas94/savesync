@@ -56,7 +56,7 @@ impl<B: Backend> Engine<B> {
 
     pub(super) fn save_remote(&self, index: &Index) -> Result<(), EngineError> {
         let bytes = serde_json::to_vec(index).map_err(EngineError::BadRemoteIndex)?;
-        self.backend.put_index(&bytes)?;
+        self.backend.publish_index(&bytes, &self.device_id)?;
         Ok(())
     }
 

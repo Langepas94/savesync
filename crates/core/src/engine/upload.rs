@@ -43,7 +43,9 @@ impl<B: Backend> Engine<B> {
             // Local deduplication must not suppress delivery to a second channel
             // or a retry after an index upload failed.
             let version = local_head.as_ref().unwrap();
-            self.cache_snapshot(game_key, &version.id, &std::fs::read(&tmp_snap)?)?;
+            if !self.cache_path(game_key, &version.id)?.is_file() {
+                self.cache_snapshot(game_key, &version.id, &std::fs::read(&tmp_snap)?)?;
+            }
             self.publish_local(&local)?;
             std::fs::remove_file(&tmp_snap).ok();
             return Ok(PushOutcome::Unchanged);

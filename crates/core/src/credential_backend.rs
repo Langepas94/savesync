@@ -99,6 +99,9 @@ impl Backend for CredentialBackend {
     fn get_index(&self) -> io::Result<Option<Vec<u8>>> {
         self.execute(|backend| backend.get_index())
     }
+    fn publish_index(&self, data: &[u8], writer: &str) -> io::Result<()> {
+        self.execute(|backend| backend.publish_index(data, writer))
+    }
     fn put_index(&self, data: &[u8]) -> io::Result<()> {
         self.execute(|backend| backend.put_index(data))
     }

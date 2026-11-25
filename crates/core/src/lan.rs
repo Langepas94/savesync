@@ -56,6 +56,7 @@ enum Operation {
     Ping,
     GetIndex,
     PutIndex,
+    PublishIndex { writer: String },
     GetSnapshot { game: String, version: String },
     PutSnapshot { game: String, version: String },
     ListSnapshots { game: String },

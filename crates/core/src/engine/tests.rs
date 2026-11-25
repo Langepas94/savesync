@@ -712,3 +712,24 @@ fn cloud_publication_failure_does_not_roll_back_committed_local_restore() {
         PullOutcome::UpToDate
     );
 }
+
+#[test]
+fn unchanged_push_keeps_original_archive_bytes() {
+    let world = World::new("immutable-archive");
+    let pc = world.device("pc");
+    pc.write_save("same");
+    let id = match pc.engine.push("test-game", &pc.locations()).unwrap() {
+        PushOutcome::Uploaded(version) => version.id,
+        _ => panic!(),
+    };
+    let before = world.backend().get_snapshot("test-game", &id).unwrap();
+    pc.engine.push("test-game", &pc.locations()).unwrap();
+    assert_eq!(
+        world.backend().get_snapshot("test-game", &id).unwrap(),
+        before
+    );
+    assert_eq!(
+        std::fs::read(pc.engine.cache_path("test-game", &id).unwrap()).unwrap(),
+        before
+    );
+}
