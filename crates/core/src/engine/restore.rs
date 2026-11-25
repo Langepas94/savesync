@@ -1,7 +1,26 @@
 use super::*;
 impl<B: Backend> Engine<B> {
-    /// Загрузка последней версии (по конфликт-политике игры).
     pub fn pull(
+        &self,
+        manifest: &Manifest,
+        roots: &Roots,
+        platform: Platform,
+    ) -> Result<PullOutcome, EngineError> {
+        let _guard = self.state_guard()?;
+        self.pull_locked(manifest, roots, platform)
+    }
+    pub fn pull_version(
+        &self,
+        manifest: &Manifest,
+        roots: &Roots,
+        platform: Platform,
+        version: &str,
+    ) -> Result<PullOutcome, EngineError> {
+        let _guard = self.state_guard()?;
+        self.pull_version_locked(manifest, roots, platform, version)
+    }
+    /// Загрузка последней версии (по конфликт-политике игры).
+    fn pull_locked(
         &self,
         manifest: &Manifest,
         roots: &Roots,
@@ -47,11 +66,11 @@ impl<B: Backend> Engine<B> {
             },
         };
 
-        self.pull_version(manifest, roots, platform, &target)
+        self.pull_version_locked(manifest, roots, platform, &target)
     }
 
     /// Применение конкретной версии (откат, выбор ветки конфликта).
-    pub fn pull_version(
+    fn pull_version_locked(
         &self,
         manifest: &Manifest,
         roots: &Roots,
@@ -79,7 +98,22 @@ impl<B: Backend> Engine<B> {
             .game(game_key)
             .map(|g| g.heads().iter().map(|v| v.id.clone()).collect())
             .unwrap_or_default();
-        if self.applied_of(game_key).as_deref() == Some(version_id_) && heads.len() <= 1 {
+        if self.applied_of(game_key).as_deref() == Some(version_id_)
+            && heads.len() == 1
+            && heads[0] == version_id_
+            && local
+                .game(game_key)
+                .and_then(|game| game.get(version_id_))
+                .is_some_and(|version| {
+                    self.matches_cached_version(
+                        manifest,
+                        roots,
+                        platform,
+                        version_id_,
+                        &version.hash,
+                    )
+                })
+        {
             return Ok(PullOutcome::UpToDate);
         }
 
@@ -103,6 +137,15 @@ impl<B: Backend> Engine<B> {
             return Err(EngineError::CorruptedSnapshot(version_id_.into()));
         }
 
+        if snap_manifest
+            .locations
+            .iter()
+            .all(|location| location.files.is_empty())
+        {
+            return Err(EngineError::CorruptedSnapshot(
+                "empty restore snapshot".into(),
+            ));
+        }
         self.cache_snapshot(game_key, version_id_, &std::fs::read(&snap_path)?)?;
 
         // Базы локаций на ЭТОМ устройстве: паттерн -> резолв -> база.
@@ -144,32 +187,74 @@ impl<B: Backend> Engine<B> {
                 }
             }
         }
-        let stamp = snapshot::now_millis();
-        for (location, base) in &targets {
-            for file in &location.files {
-                let current = base.join(&file.rel_path);
-                if current.is_file() {
-                    let backup = self
-                        .state_dir
-                        .join("backups")
-                        .join(&component)
-                        .join(stamp.to_string())
-                        .join(sanitize(base))
-                        .join(&file.rel_path);
-                    if let Some(parent) = backup.parent() {
-                        std::fs::create_dir_all(parent)?;
-                    }
-                    std::fs::copy(&current, &backup)?;
+        let (transaction, _stage) = self.prepare_restore(
+            manifest,
+            roots,
+            platform,
+            &snap_path,
+            &snap_manifest,
+            &targets,
+        )?;
+        let needs_publication = heads.len() > 1 || !heads.iter().any(|head| head == version_id_);
+        let applied = transaction.commit(|| {
+            // A conflict choice is a new merge commit, preserving every old
+            // snapshot while ensuring the next sync has a single head.
+            let applied = if heads.len() > 1 || !heads.iter().any(|head| head == version_id_) {
+                let selected = local
+                    .game(game_key)
+                    .and_then(|g| g.get(version_id_))
+                    .unwrap();
+                let mut stamp = now_millis().max(
+                    local
+                        .game(game_key)
+                        .unwrap()
+                        .versions
+                        .iter()
+                        .map(|v| v.created_at)
+                        .max()
+                        .unwrap_or(0)
+                        .saturating_add(1),
+                );
+                while local
+                    .game(game_key)
+                    .unwrap()
+                    .get(&version_id(stamp, &self.device_id, &selected.hash))
+                    .is_some()
+                {
+                    stamp = stamp.checked_add(1).ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::InvalidData, "version timestamp overflow")
+                    })?;
                 }
+                let resolution = Version {
+                    id: version_id(stamp, &self.device_id, &selected.hash),
+                    parent: Some(version_id_.to_string()),
+                    merged_parents: heads.into_iter().filter(|id| id != version_id_).collect(),
+                    created_at: stamp,
+                    device: self.device_id.clone(),
+                    hash: selected.hash.clone(),
+                };
+                self.cache_snapshot(
+                    game_key,
+                    &resolution.id,
+                    &self.backend.get_snapshot(game_key, version_id_)?,
+                )?;
+                let id = resolution.id.clone();
+                local.add_version(game_key, resolution);
+                id
+            } else {
+                version_id_.to_string()
+            };
+            self.save_local(&local)?;
+            self.mark_applied(game_key, &applied)?;
+            Ok(applied)
+        })?;
+        if needs_publication {
+            if let Err(error) = self.publish_local(&local) {
+                return Err(EngineError::RestorePublicationPending {
+                    version: applied,
+                    source: io::Error::other(error),
+                });
             }
-        }
-        for (loc, base) in &targets {
-            let source = snap_manifest
-                .locations
-                .iter()
-                .find(|source| source.archive_dir == loc.archive_dir)
-                .unwrap();
-            snapshot::extract_location_mapped(&snap_path, source, loc, base)?;
         }
         let _ = crate::backup::prune_dir_backups(
             &self.state_dir,
@@ -177,57 +262,6 @@ impl<B: Backend> Engine<B> {
             self.backup_retention.max(1) as usize,
         );
         std::fs::remove_file(&snap_path).ok();
-
-        // A conflict choice is a new merge commit, preserving every old
-        // snapshot while ensuring the next sync has a single head.
-        let applied = if heads.len() > 1 {
-            let selected = local
-                .game(game_key)
-                .and_then(|g| g.get(version_id_))
-                .unwrap();
-            let mut stamp = now_millis().max(
-                local
-                    .game(game_key)
-                    .unwrap()
-                    .versions
-                    .iter()
-                    .map(|v| v.created_at)
-                    .max()
-                    .unwrap_or(0)
-                    .saturating_add(1),
-            );
-            while local
-                .game(game_key)
-                .unwrap()
-                .get(&version_id(stamp, &self.device_id, &selected.hash))
-                .is_some()
-            {
-                stamp = stamp.checked_add(1).ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::InvalidData, "version timestamp overflow")
-                })?;
-            }
-            let resolution = Version {
-                id: version_id(stamp, &self.device_id, &selected.hash),
-                parent: Some(version_id_.to_string()),
-                merged_parents: heads.into_iter().filter(|id| id != version_id_).collect(),
-                created_at: stamp,
-                device: self.device_id.clone(),
-                hash: selected.hash.clone(),
-            };
-            self.cache_snapshot(
-                game_key,
-                &resolution.id,
-                &self.backend.get_snapshot(game_key, version_id_)?,
-            )?;
-            let id = resolution.id.clone();
-            local.add_version(game_key, resolution);
-            self.publish_local(&local)?;
-            id
-        } else {
-            version_id_.to_string()
-        };
-        self.save_local(&local)?;
-        self.mark_applied(game_key, &applied)?;
 
         Ok(PullOutcome::Applied {
             version: applied,

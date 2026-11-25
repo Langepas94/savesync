@@ -5,6 +5,7 @@ impl<B: Backend> Engine<B> {
     /// истории, можно откатиться через pull_version). Само применение
     /// сейвов — отдельным pull.
     pub fn import_backup(&self, path: &Path) -> Result<ImportOutcome, EngineError> {
+        let _guard = self.state_guard()?;
         if !snapshot::verify(path)? {
             return Err(EngineError::CorruptedSnapshot(path.display().to_string()));
         }

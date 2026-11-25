@@ -6,6 +6,7 @@ impl<B: Backend> Engine<B> {
         game_key: &str,
         locations: &[SaveLocation],
     ) -> Result<PushOutcome, EngineError> {
+        let _guard = self.state_guard()?;
         // Игра запущена на другом устройстве — ждём (plan §2.1).
         if let Some(holder) = self.foreign_lock(game_key)? {
             return Ok(PushOutcome::Locked(holder));

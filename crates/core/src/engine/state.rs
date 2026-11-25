@@ -1,5 +1,8 @@
 use super::*;
 impl<B: Backend> Engine<B> {
+    pub(super) fn state_guard(&self) -> io::Result<std::fs::File> {
+        file_transaction::state_guard(&self.state_dir)
+    }
     pub(super) fn local_index_path(&self) -> PathBuf {
         self.state_dir.join("index.json")
     }

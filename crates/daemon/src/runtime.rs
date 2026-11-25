@@ -35,6 +35,7 @@ impl Runtime {
     /// пользователя из `<state_dir>/custom/*.yaml` — они никогда не
     /// перезаписываются обновлением базы.
     pub fn new(config: Config, state_dir: PathBuf) -> io::Result<Self> {
+        savesync_core::engine::recover_state(&state_dir)?;
         let mut manifests = savesync_core::bundled_manifests::load();
         let installed_database = state_dir
             .parent()

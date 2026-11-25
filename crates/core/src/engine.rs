@@ -22,6 +22,8 @@ use crate::snapshot;
 use crate::snapshot::now_millis;
 
 mod destinations;
+mod file_transaction;
+mod restore_plan;
 
 #[derive(Debug, Error)]
 pub enum EngineError {
@@ -31,6 +33,10 @@ pub enum EngineError {
     CorruptedSnapshot(String),
     #[error("remote index is invalid: {0}")]
     BadRemoteIndex(serde_json::Error),
+    #[error(
+        "version {version} restored locally; remote publication pending, retry sync: {source}"
+    )]
+    RestorePublicationPending { version: String, source: io::Error },
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -100,11 +106,6 @@ impl<B: Backend> Engine<B> {
     }
 }
 
-fn sanitize(path: &Path) -> PathBuf {
-    let s = path.to_string_lossy().replace([':', '\\'], "/");
-    PathBuf::from(s.trim_start_matches('/').replace('/', "__"))
-}
-
 mod import;
 mod locks;
 mod restore;
@@ -112,3 +113,9 @@ mod state;
 #[cfg(test)]
 mod tests;
 mod upload;
+
+/// Recover an interrupted file restore before exposing profile state to clients.
+pub fn recover_state(state: &Path) -> io::Result<()> {
+    let _guard = file_transaction::state_guard(state)?;
+    Ok(())
+}

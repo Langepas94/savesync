@@ -81,6 +81,13 @@ def run(binary: Path) -> None:
         outcome("deck", "uploaded", "sync", "smoke-game")
         outcome("pc", "applied", "sync", "smoke-game")
         assert (root / "pc/home/saves/slot2.sav").read_text() == "new slot"
+        history = command("pc", "history", "smoke-game")["data"]
+        oldest = min(history["versions"], key=lambda version: version["created_at"])["id"]
+        outcome("pc", "applied", "restore", "smoke-game", oldest)
+        assert not (root / "pc/home/saves/slot2.sav").exists()
+        outcome("pc", "up_to_date", "sync", "smoke-game")
+        outcome("deck", "applied", "sync", "smoke-game")
+        assert not (root / "deck/home/saves/slot2.sav").exists()
         command("pc", "backup", "create", "smoke-game", parse=False)
         backups = list((root / "pc/backups").glob("*.savesync-backup"))
         assert backups
