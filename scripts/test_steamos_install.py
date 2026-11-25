@@ -60,6 +60,15 @@ def main():
         assert all(path.read_bytes() == content for path, content in before.items())
         assert marker.read_text() == "user data"
         assert not list((home / ".local/bin").glob(".savesync-stage.*"))
+        outside = root / "outside-app"
+        outside.write_bytes(before[app])
+        app.unlink()
+        app.symlink_to(outside)
+        install(success=False)
+        assert app.is_symlink() and outside.read_bytes() == before[app]
+        app.unlink()
+        app.write_bytes(before[app])
+        app.chmod(0o755)
         (package / "savesync-app").unlink()
         install(success=False)
         assert all(path.read_bytes() == content for path, content in before.items())

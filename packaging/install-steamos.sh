@@ -61,6 +61,7 @@ finish() {
   exit "$result"
 }
 trap finish EXIT
+for target in "${targets[@]}"; do if [[ -L "$target" ]]; then echo 'installation targets must not be symlinks' >&2; exit 1; fi; done
 for number in "${!targets[@]}"; do if [[ -e "${targets[$number]}" ]]; then cp -p -- "${targets[$number]}" "$stage/old-$number"; fi; done
 install -m 0755 "$source_daemon" "$stage/new-0"
 install -m 0755 "$source_app" "$stage/new-1"

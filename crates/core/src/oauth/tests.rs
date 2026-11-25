@@ -179,7 +179,10 @@ fn callback(url: &url::Url, query: &str) -> String {
     let mut length = None;
     loop {
         let mut line = String::new();
-        reader.read_line(&mut line).unwrap();
+        assert!(
+            reader.read_line(&mut line).unwrap() > 0,
+            "incomplete callback HTTP response"
+        );
         if line == "\r\n" {
             break;
         }
