@@ -17,22 +17,39 @@ pub enum Method {
     Scan,
     /// Reload installed/curated/custom manifests and rescan without restart.
     ReloadManifests,
+    OAuthBegin {
+        provider: crate::oauth::Provider,
+    },
+    OAuthPoll {
+        provider: crate::oauth::Provider,
+    },
+    OAuthCancel {
+        provider: crate::oauth::Provider,
+    },
     /// Ручная синхронизация (MVP-триггер). `None` — все игры.
-    Sync { game_key: Option<String> },
+    Sync {
+        game_key: Option<String>,
+    },
     /// История версий игры (из локального индекса).
-    History { game_key: String },
+    History {
+        game_key: String,
+    },
     /// Применить конкретную версию (откат / выбор ветки конфликта).
     Restore {
         game_key: String,
         version_id: String,
     },
     /// Переносимый бэкап игры в папку `backups.dir` (plan §2.2).
-    Backup { game_key: String },
+    Backup {
+        game_key: String,
+    },
     /// Текущий конфиг (каналы, бэкапы, пути).
     GetConfig,
     /// Сохранить конфиг (каналы/бэкапы/пути). Демон перечитывает его
     /// на следующую операцию.
-    SaveConfig { config: Box<crate::config::Config> },
+    SaveConfig {
+        config: Box<crate::config::Config>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -102,12 +119,26 @@ pub struct RpcError {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum ResponsePayload {
+    OAuthStart(OAuthStartPayload),
+    OAuthStatus(OAuthStatusPayload),
     Status(StatusPayload),
     Scan(ScanPayload),
     Sync(SyncPayload),
     History(HistoryPayload),
     Backup(BackupPayload),
     Config(ConfigPayload),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OAuthStartPayload {
+    pub provider: crate::oauth::Provider,
+    pub authorization_url: String,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OAuthStatusPayload {
+    pub provider: crate::oauth::Provider,
+    pub state: String,
+    pub message: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

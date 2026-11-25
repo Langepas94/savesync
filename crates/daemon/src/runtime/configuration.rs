@@ -44,6 +44,8 @@ impl Runtime {
             std::fs::create_dir_all(parent)?;
         }
         config.save(&path)?;
+        config = Config::load(&path)?
+            .ok_or_else(|| io::Error::other("saved configuration unavailable"))?;
         if self.serving {
             if same_port {
                 self.lan_server

@@ -129,3 +129,31 @@ fn game_view_renders_with_an_egui_context_without_a_window() {
     assert!(!output.shapes.is_empty());
     assert!(app.job.is_none());
 }
+
+#[test]
+fn oauth_poll_updates_form_without_opening_browser() {
+    use savesync_core::{ipc::OAuthStatusPayload, oauth::Provider};
+    struct Fake;
+    impl DaemonClient for Fake {
+        fn request(&self, method: Method) -> Result<ResponsePayload, String> {
+            assert_eq!(
+                method,
+                Method::OAuthPoll {
+                    provider: Provider::Google
+                }
+            );
+            Ok(ResponsePayload::OAuthStatus(OAuthStatusPayload {
+                provider: Provider::Google,
+                state: "connected".into(),
+                message: None,
+            }))
+        }
+    }
+    let mut app = SaveSyncApp::new();
+    app.client = Arc::new(Fake);
+    app.oauth_pending = Some(Provider::Google);
+    app.poll_oauth();
+    assert!(app.oauth_pending.is_none());
+    assert!(app.cfg.is_none());
+    assert!(!app.form_loaded);
+}

@@ -7,8 +7,9 @@ Google Drive и/или прямая LAN-синхронизация.
 
 **Статус:** версия в разработке, к релизу 1.0.0 пока не готова.
 Реализованы ручная синхронизация, история, конфликты, бэкапы, desktop UI
-и Decky-прокси. Защищённый LAN, полный OAuth, CAS индекса и Windows-установка
-ещё требуют реализации. См. [QA-отчёт](docs/QA-2026-11-25.md).
+и Decky-прокси. Защищённый LAN, CAS индекса и Windows-установка
+ещё требуют реализации. Настраиваемый OAuth реализован; живой вход требует
+регистрации приложений Google/Яндекс. См. [QA-отчёт](docs/QA-2026-11-25.md).
 Автотриггеры синхронизации относятся к итерации 2.
 
 ## Архитектура
@@ -103,8 +104,8 @@ savesync-daemon manifests import /путь/к/savesync-manifests
 2. Автозапуск демона — добавить в `HKCU\Software\Microsoft\Windows\
    CurrentVersion\Run` команду `savesync-daemon serve`
    (user-context, не SYSTEM-сервис).
-3. Запустить `savesync-app.exe`: экран «Подключения» — токен Яндекс.Диска
-   и/или Google Drive, LAN-pairing по PIN, либо только локальные бэкапы.
+3. Запустить `savesync-app.exe`: экран «Подключения» — OAuth Яндекс.Диска
+   и/или Google Drive ([настройка](docs/OAUTH.md)), LAN по PIN либо локальные бэкапы.
 
 ### Steam Deck (SteamOS)
 

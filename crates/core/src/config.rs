@@ -113,6 +113,17 @@ impl Config {
     /// Загружает конфиг или создаёт новый (генерируя device_id).
     pub fn load_or_init(path: &Path) -> io::Result<Config> {
         if let Some(cfg) = Self::load(path)? {
+            let legacy = cfg.backends.google.as_ref().is_some_and(|backend| {
+                !backend.token.is_empty() && !crate::credentials::is_reference(&backend.token)
+            }) || cfg.backends.yandex.as_ref().is_some_and(|backend| {
+                !backend.token.is_empty() && !crate::credentials::is_reference(&backend.token)
+            });
+            if legacy {
+                cfg.save(path)?;
+                return Self::load(path)?.ok_or_else(|| {
+                    io::Error::other("config disappeared during credential migration")
+                });
+            }
             return Ok(cfg);
         }
         let cfg = Config {
@@ -128,16 +139,82 @@ impl Config {
     }
 
     pub fn save(&self, path: &Path) -> io::Result<()> {
+        self.save_with_store(path, &crate::credentials::OsSecretStore)
+    }
+
+    pub fn save_with_store(
+        &self,
+        path: &Path,
+        store: &dyn crate::credentials::SecretStore,
+    ) -> io::Result<()> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(
-            &tmp,
-            serde_json::to_vec_pretty(self)
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?,
-        )?;
-        std::fs::rename(&tmp, path)
+        let lock = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(path.with_extension("json.lock"))?;
+        fs2::FileExt::lock_exclusive(&lock)?;
+        let old = Self::load(path)?;
+        // A stale UI must not replace a live credential with a deleted reference.
+        for (provider, new_ref, old_ref) in [
+            (
+                crate::oauth::Provider::Google,
+                self.backends
+                    .google
+                    .as_ref()
+                    .map(|value| value.token.as_str()),
+                old.as_ref()
+                    .and_then(|config| config.backends.google.as_ref())
+                    .map(|value| value.token.as_str()),
+            ),
+            (
+                crate::oauth::Provider::Yandex,
+                self.backends
+                    .yandex
+                    .as_ref()
+                    .map(|value| value.token.as_str()),
+                old.as_ref()
+                    .and_then(|config| config.backends.yandex.as_ref())
+                    .map(|value| value.token.as_str()),
+            ),
+        ] {
+            if let Some(reference) = new_ref.filter(|reference| {
+                crate::credentials::is_reference(reference) && Some(*reference) != old_ref
+            }) {
+                crate::credentials::load(store,reference,provider).map_err(|_|io::Error::new(io::ErrorKind::PermissionDenied,"credential reference is unavailable or stale; reload settings and sign in again"))?;
+            }
+        }
+        let secured = crate::credentials::secure_config(self, store)?;
+        let result = (|| {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            let tmp = path.with_extension("json.tmp");
+            std::fs::write(
+                &tmp,
+                serde_json::to_vec_pretty(&secured).map_err(io::Error::other)?,
+            )?;
+            std::fs::rename(&tmp, path)
+        })();
+        let new_refs = crate::credentials::references(&secured);
+        if result.is_err() {
+            let original_refs = crate::credentials::references(self);
+            for reference in new_refs {
+                if !original_refs.contains(&reference) {
+                    let _ = crate::credentials::delete(store, reference);
+                }
+            }
+        } else if let Some(old) = old {
+            for reference in crate::credentials::references(&old) {
+                if !new_refs.contains(&reference) {
+                    let _ = crate::credentials::delete(store, reference);
+                }
+            }
+        }
+        result
     }
 }
 

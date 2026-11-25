@@ -25,6 +25,14 @@ pub(crate) fn validate_result(
     method: &Method,
     payload: ResponsePayload,
 ) -> Result<ResponsePayload, String> {
+    if let ResponsePayload::OAuthStatus(status) = &payload {
+        if status.state == "error" {
+            return Err(status
+                .message
+                .clone()
+                .unwrap_or_else(|| "OAuth error".into()));
+        }
+    }
     if let ResponsePayload::Sync(sync) = &payload {
         let failures: Vec<_> = sync
             .results
@@ -49,7 +57,12 @@ pub(crate) fn validate_result(
         }
     }
     let valid = match (method, &payload) {
-        (Method::Status, ResponsePayload::Status(_))
+        (Method::OAuthBegin { .. }, ResponsePayload::OAuthStart(_))
+        | (
+            Method::OAuthPoll { .. } | Method::OAuthCancel { .. },
+            ResponsePayload::OAuthStatus(_),
+        )
+        | (Method::Status, ResponsePayload::Status(_))
         | (Method::Scan | Method::ReloadManifests, ResponsePayload::Scan(_))
         | (Method::History { .. }, ResponsePayload::History(_))
         | (Method::Backup { .. }, ResponsePayload::Backup(_))

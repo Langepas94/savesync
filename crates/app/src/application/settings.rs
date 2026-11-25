@@ -4,13 +4,25 @@ impl SaveSyncApp {
         ui.heading("Подключения");
         ui.label(
             RichText::new(
-                "Каналы независимы: можно настроить любой набор. Токены вводятся вручную.",
+                "Каналы независимы. Подключите облако через браузер или укажите готовый токен.",
             )
             .color(DIM)
             .small(),
         );
         ui.add_space(8.0);
 
+        if let Some(provider) = self.oauth_pending {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label("Ожидание входа в браузере");
+                if ui
+                    .add_enabled(!self.busy(), egui::Button::new("Отменить вход"))
+                    .clicked()
+                {
+                    self.cancel_oauth(provider);
+                }
+            });
+        }
         egui::ScrollArea::vertical().show(ui, |ui| {
             egui::Frame::group(ui.style()).fill(PANEL).show(ui, |ui| {
                 ui.label(RichText::new("Локальная папка / USB (fs)").strong());
@@ -23,6 +35,15 @@ impl SaveSyncApp {
 
             egui::Frame::group(ui.style()).fill(PANEL).show(ui, |ui| {
                 ui.label(RichText::new("Яндекс.Диск").strong());
+                if ui
+                    .add_enabled(
+                        !self.busy() && self.oauth_pending.is_none(),
+                        egui::Button::new("Подключить Яндекс через браузер"),
+                    )
+                    .clicked()
+                {
+                    self.begin_oauth(savesync_core::oauth::Provider::Yandex);
+                }
                 ui.horizontal(|ui| {
                     ui.label("OAuth-токен:");
                     ui.add(
@@ -36,6 +57,15 @@ impl SaveSyncApp {
 
             egui::Frame::group(ui.style()).fill(PANEL).show(ui, |ui| {
                 ui.label(RichText::new("Google Drive").strong());
+                if ui
+                    .add_enabled(
+                        !self.busy() && self.oauth_pending.is_none(),
+                        egui::Button::new("Подключить Google через браузер"),
+                    )
+                    .clicked()
+                {
+                    self.begin_oauth(savesync_core::oauth::Provider::Google);
+                }
                 ui.horizontal(|ui| {
                     ui.label("Access token:");
                     ui.add(

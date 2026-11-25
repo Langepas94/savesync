@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+- Configurable Google/Yandex native OAuth with S256 PKCE, loopback callback,
+  UI login/cancel and CLI remote login/logout; no embedded application credentials.
+- OS credential references replace plaintext config tokens; migration, refresh
+  rotation, fail-closed storage and isolated cloud-channel failures.
+- Mock token-service/secret-store and callback regression tests; see docs/OAUTH.md.
+
+
 ### Restore transactions
 
 - Staged restore с safety backups и journal, rollback файлов и index/applied

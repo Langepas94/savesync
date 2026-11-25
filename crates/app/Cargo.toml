@@ -9,3 +9,6 @@ repository.workspace = true
 [dependencies]
 savesync-core = { path = "../core" }
 eframe = "0.29"
+webbrowser = "1.2.7"
+
+url = "2.5.9"

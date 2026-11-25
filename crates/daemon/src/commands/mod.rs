@@ -10,3 +10,5 @@ pub(crate) use service::cmd_serve;
 
 mod manifests;
 pub(crate) use manifests::cmd_manifests;
+
+mod authorization;
