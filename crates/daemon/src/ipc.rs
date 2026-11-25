@@ -118,6 +118,7 @@ mod tests {
             device_name: "Test Device".into(),
             manifests_dir: None,
             backends: Default::default(),
+            backups: Default::default(),
         };
         Runtime {
             config,

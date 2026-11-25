@@ -89,4 +89,12 @@
 - Демон: `serve` поднимает LAN-сервер при `backends.lan`; каналы LAN
   (своё хранилище + пиры) участвуют в sync наравне с облаком; CLI
   `remote setup lan <port> <pin>`, `remote peer add|remove <host:port>`.
+- `savesync-core::backup` — пользовательские бэкапы (M6, plan §2.2):
+  переносимые файлы `*.savesync-backup` (самодостаточный zip-снапшот),
+  `create/list/prune`; `Engine::import_backup` регистрирует файл как
+  новую версию в линии игры (с дедупликацией по контент-хешу).
+- Retention авто-бэкапов движка перед затиранием (по умолчанию 10,
+  `Engine::with_backup_retention`).
+- CLI `backup create|list|import|dir|auto`; в `serve` — тред авто-бэкапов
+  по расписанию (`backups.auto_interval_hours`, проверка раз в 30 мин).
 - CI (GitHub Actions): fmt, clippy, test на Windows и Ubuntu.

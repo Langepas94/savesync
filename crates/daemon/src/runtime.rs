@@ -67,7 +67,7 @@ impl Runtime {
 
     /// Каналы синхронизации (plan §3): настроенные бэкенды, каждый —
     /// отдельный Engine. Каналы независимы: sync идёт по всем.
-    fn engines(&self) -> Result<Vec<Engine<Box<dyn Backend>>>, String> {
+    pub fn engines(&self) -> Result<Vec<Engine<Box<dyn Backend>>>, String> {
         let mut out: Vec<Engine<Box<dyn Backend>>> = Vec::new();
         if let Some(fs) = &self.config.backends.fs_path {
             out.push(Engine::new(
@@ -209,6 +209,56 @@ impl Runtime {
             }
         }
         ResponsePayload::Sync(SyncPayload { results })
+    }
+
+    /// Авто-бэкапы по расписанию (plan §2.2): переносимый бэкап каждой
+    /// найденной игры в `backups.dir` + retention. Число созданных файлов.
+    pub fn run_auto_backup(&mut self) -> io::Result<usize> {
+        let Some(dir) = self.config.backups.dir.clone() else {
+            return Ok(0);
+        };
+        if self.last_scan.is_empty() {
+            self.last_scan = scanner::scan(&self.manifests, self.platform, &self.roots);
+        }
+        let keep = self.config.backups.keep.unwrap_or(10) as usize;
+        let mut created = 0;
+        let games = self.last_scan.clone();
+        for g in &games {
+            savesync_core::backup::create_backup(
+                &g.game_key,
+                &self.config.device_id,
+                &g.locations,
+                &dir,
+            )?;
+            savesync_core::backup::prune_backup_files(&dir, &g.game_key, keep)?;
+            created += 1;
+        }
+        Ok(created)
+    }
+
+    /// Пора ли делать авто-бэкап (интервал из конфига прошёл).
+    pub fn auto_backup_due(&self) -> bool {
+        let Some(hours) = self.config.backups.auto_interval_hours else {
+            return false;
+        };
+        if self.config.backups.dir.is_none() {
+            return false;
+        }
+        let stamp = self.state_dir.join("last_auto_backup");
+        let last = std::fs::read_to_string(&stamp)
+            .ok()
+            .and_then(|s| s.trim().parse::<u64>().ok())
+            .unwrap_or(0);
+        savesync_core::snapshot::now_millis().saturating_sub(last) >= u64::from(hours) * 3_600_000
+    }
+
+    /// Отметить время последнего авто-бэкапа.
+    pub fn mark_auto_backup_done(&self) {
+        let _ = std::fs::create_dir_all(&self.state_dir);
+        let _ = std::fs::write(
+            self.state_dir.join("last_auto_backup"),
+            savesync_core::snapshot::now_millis().to_string(),
+        );
     }
 }
 
@@ -361,6 +411,7 @@ mod tests {
                         fs_path: Some(self.dir.join("remote")),
                         ..BackendsConfig::default()
                     },
+                    backups: Default::default(),
                 },
                 manifests: ManifestDb::from_entries(vec![manifest]),
                 platform: Platform::Windows,
@@ -479,6 +530,7 @@ mod tests {
             device_name: "pc".into(),
             manifests_dir: None,
             backends: BackendsConfig::default(),
+            backups: Default::default(),
         };
         let mut rt = Runtime::new(config, state).unwrap();
         // Runtime::new детектит корни реальной машины — в тесте подменяем.

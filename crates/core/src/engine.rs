@@ -57,12 +57,23 @@ pub enum PullOutcome {
     Locked(String),
 }
 
+/// Результат импорта файла бэкапа (plan §2.2).
+#[derive(Debug, PartialEq, Eq)]
+pub enum ImportOutcome {
+    /// Зарегистрирована новая версия в линии игры.
+    Registered(Version),
+    /// Такой контент уже есть от той же базы — версия не создана.
+    Duplicate(String),
+}
+
 /// Движок синхронизации одного устройства.
 pub struct Engine<B: Backend> {
     backend: B,
     device_id: String,
     /// Локальное состояние: `index.json` (с `applied`), `tmp/`, `backups/`.
     state_dir: PathBuf,
+    /// Сколько авто-бэкапов на игру хранить (plan §2.1, retention).
+    backup_retention: u32,
 }
 
 impl<B: Backend> Engine<B> {
@@ -71,7 +82,14 @@ impl<B: Backend> Engine<B> {
             backend,
             device_id: device_id.into(),
             state_dir: state_dir.into(),
+            backup_retention: 10,
         }
+    }
+
+    /// Retention авто-бэкапов перед затиранием (по умолчанию 10).
+    pub fn with_backup_retention(mut self, keep: u32) -> Self {
+        self.backup_retention = keep;
+        self
     }
 
     /// Имя канала синхронизации (для логов и отчётов sync).
@@ -337,6 +355,12 @@ impl<B: Backend> Engine<B> {
                 copy_dir(base, &backup)?;
             }
         }
+        // Retention авто-бэкапов (plan §2.1/§2.2).
+        let _ = crate::backup::prune_dir_backups(
+            &self.state_dir,
+            game_key,
+            self.backup_retention as usize,
+        );
 
         for (loc, base) in &targets {
             snapshot::extract_location(&snap_path, loc, base)?;
@@ -350,6 +374,46 @@ impl<B: Backend> Engine<B> {
             version: version_id_.to_string(),
             skipped,
         })
+    }
+
+    /// Импорт переносимого бэкапа `*.savesync-backup` (plan §2.2):
+    /// файл регистрируется как новая версия в линии игры (видна в
+    /// истории, можно откатиться через pull_version). Само применение
+    /// сейвов — отдельным pull.
+    pub fn import_backup(&self, path: &Path) -> Result<ImportOutcome, EngineError> {
+        if !snapshot::verify(path)? {
+            return Err(EngineError::CorruptedSnapshot(path.display().to_string()));
+        }
+        let snap_manifest = snapshot::read_manifest(path)?;
+        let game_key = snap_manifest.game_key.clone();
+
+        let mut local = self.load_local()?;
+        let head = local.game(&game_key).and_then(|g| g.head().cloned());
+        // Тот же контент от той же базы уже есть — дубликат.
+        if head.as_ref().map(|h| h.hash.as_str()) == Some(snap_manifest.content_hash.as_str()) {
+            return Ok(ImportOutcome::Duplicate(head.unwrap().id));
+        }
+
+        let id = version_id(now_millis(), &self.device_id, &snap_manifest.content_hash);
+        let version = Version {
+            parent: head.map(|h| h.id),
+            id: id.clone(),
+            created_at: snap_manifest.created_at,
+            device: format!("{}(import)", snap_manifest.device_id),
+            hash: snap_manifest.content_hash,
+        };
+
+        let data = std::fs::read(path)?;
+        self.backend.put_snapshot(&game_key, &id, &data)?;
+
+        local.add_version(&game_key, version.clone());
+        self.save_local(&local)?;
+
+        let mut remote = self.load_remote()?;
+        remote.merge(&local);
+        self.save_remote(&remote)?;
+
+        Ok(ImportOutcome::Registered(version))
     }
 
     /// Резолвит базу локации по паттерну из манифеста игры.
@@ -564,6 +628,40 @@ mod tests {
             PullOutcome::Applied { .. }
         ));
         assert_eq!(deck.read_save(), "pc progress");
+    }
+
+    #[test]
+    fn import_backup_registers_version() {
+        let world = World::new("import");
+        let pc = world.device("pc");
+        let deck = world.device("deck");
+        let m = manifest();
+
+        // PC делает переносимый бэкап (например, на флешку).
+        pc.write_save("flash progress");
+        let backup_dir = world.dir.join("usb");
+        let file =
+            crate::backup::create_backup("test-game", "pc", &pc.locations(), &backup_dir).unwrap();
+
+        // deck импортирует его как новую версию в линии игры.
+        let outcome = deck.engine.import_backup(&file).unwrap();
+        let ImportOutcome::Registered(v) = outcome else {
+            panic!("expected Registered, got {outcome:?}")
+        };
+        assert!(v.parent.is_none());
+        assert_eq!(v.device, "pc(import)");
+
+        // Версия видна в линии и применяется обычным pull.
+        let pulled = deck
+            .engine
+            .pull(&m, &deck.roots, Platform::Windows)
+            .unwrap();
+        assert!(matches!(pulled, PullOutcome::Applied { .. }));
+        assert_eq!(deck.read_save(), "flash progress");
+
+        // Повторный импорт того же файла — дубликат, версия не плодится.
+        let again = deck.engine.import_backup(&file).unwrap();
+        assert!(matches!(again, ImportOutcome::Duplicate(_)));
     }
 
     #[test]
