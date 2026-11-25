@@ -6,6 +6,8 @@
 //! Ответ:   `{"id": 1, "result": {...}}` или `{"id": 1, "error": {...}}`
 
 use serde::{Deserialize, Serialize};
+mod auth;
+pub use auth::authorize_peer;
 
 /// Методы протокола.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -180,6 +182,8 @@ pub struct ConfigPayload {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StatusPayload {
+    #[serde(default)]
+    pub busy: bool,
     pub daemon_version: String,
     pub device_id: String,
     pub device_name: String,
@@ -250,6 +254,7 @@ pub mod client {
     /// Клиентский вызов: один запрос — одно соединение — один ответ.
     pub fn call(name: &str, request: Request) -> std::io::Result<Response> {
         let mut stream = LocalSocketStream::connect(ns_name(name)?)?;
+        super::authorize_peer(&stream)?;
         stream.write_all(
             request
                 .encode()

@@ -4,6 +4,7 @@ use std::{collections::HashMap, sync::Mutex};
 pub(crate) struct MemoryStore {
     pub values: Mutex<HashMap<String, String>>,
     pub fail_meta: Mutex<bool>,
+    pub fail_after_commit: Mutex<bool>,
 }
 impl SecretStore for MemoryStore {
     fn get(&self, key: &str) -> io::Result<String> {
@@ -19,6 +20,9 @@ impl SecretStore for MemoryStore {
             return Err(io::Error::other("injected store failure"));
         }
         self.values.lock().unwrap().insert(key.into(), value.into());
+        if key.ends_with("/meta") && *self.fail_after_commit.lock().unwrap() {
+            return Err(io::Error::other("injected post-commit failure"));
+        }
         Ok(())
     }
     fn delete(&self, key: &str) -> io::Result<()> {
@@ -29,6 +33,22 @@ impl SecretStore for MemoryStore {
             .map(|_| ())
             .ok_or_else(|| io::ErrorKind::NotFound.into())
     }
+}
+
+#[test]
+fn ambiguous_metadata_failure_never_deletes_committed_token_fields() {
+    let store = MemoryStore::default();
+    let mut token = record();
+    let reference = save(&store, None, &token).unwrap();
+    token.access_token = "rotated-after-commit".into();
+    *store.fail_after_commit.lock().unwrap() = true;
+    assert!(save(&store, Some(&reference), &token).is_err());
+    assert_eq!(
+        load(&store, &reference, Provider::Google)
+            .unwrap()
+            .access_token,
+        "rotated-after-commit"
+    );
 }
 pub(crate) fn record() -> TokenRecord {
     TokenRecord {

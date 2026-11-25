@@ -9,6 +9,7 @@ pub trait SecretStore: Send + Sync {
     fn delete(&self, key: &str) -> io::Result<()>;
 }
 pub struct OsSecretStore;
+mod file_store;
 fn store_error(error: keyring::Error) -> io::Error {
     if matches!(error, keyring::Error::NoEntry) {
         io::Error::new(io::ErrorKind::NotFound, "credential is not stored")
@@ -18,18 +19,27 @@ fn store_error(error: keyring::Error) -> io::Error {
 }
 impl SecretStore for OsSecretStore {
     fn get(&self, key: &str) -> io::Result<String> {
+        if let Some(store) = file_store::FileStore::from_environment()? {
+            return store.get(key);
+        }
         keyring::Entry::new("SaveSync", key)
             .map_err(store_error)?
             .get_password()
             .map_err(store_error)
     }
     fn put(&self, key: &str, value: &str) -> io::Result<()> {
+        if let Some(store) = file_store::FileStore::from_environment()? {
+            return store.put(key, value);
+        }
         keyring::Entry::new("SaveSync", key)
             .map_err(store_error)?
             .set_password(value)
             .map_err(store_error)
     }
     fn delete(&self, key: &str) -> io::Result<()> {
+        if let Some(store) = file_store::FileStore::from_environment()? {
+            return store.delete(key);
+        }
         keyring::Entry::new("SaveSync", key)
             .map_err(store_error)?
             .delete_credential()
@@ -102,7 +112,7 @@ pub fn save(
             provider: record.provider,
             client_id: record.client_id.clone(),
             expires_at: record.expires_at,
-            revision,
+            revision: revision.clone(),
             has_refresh: record.refresh_token.is_some(),
             has_secret: record.client_secret.is_some(),
             scope: record.scope.clone(),
@@ -110,9 +120,20 @@ pub fn save(
         store.put(&format!("{id}/meta"), &serde_json::to_string(&metadata)?)
     })();
     if let Err(error) = result {
-        for (field, value) in fields {
-            if value.is_some() {
-                let _ = store.delete(&format!("{prefix}/{field}"));
+        // A store can commit and then report a durability/transport error.
+        // Never delete fields referenced by a pointer that may already be visible.
+        let disposable = match store.get(&format!("{id}/meta")) {
+            Ok(text) => {
+                serde_json::from_str::<Metadata>(&text).is_ok_and(|meta| meta.revision != revision)
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => true,
+            Err(_) => false,
+        };
+        if disposable {
+            for (field, value) in fields {
+                if value.is_some() {
+                    let _ = store.delete(&format!("{prefix}/{field}"));
+                }
             }
         }
         return Err(error);

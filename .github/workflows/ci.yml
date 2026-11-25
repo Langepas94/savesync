@@ -60,6 +60,9 @@ jobs:
       - run: cargo test --workspace
       - run: cargo build -p savesync-daemon
       - run: python scripts/smoke.py
+      - name: SteamOS installer regression
+        if: runner.os == 'Linux'
+        run: python scripts/test_steamos_install.py
 
   decky-plugin:
     name: decky-plugin (python)
@@ -161,6 +164,7 @@ jobs:
           mkdir -p dist/savesync-steamos/systemd
           cp target/${{ matrix.target }}/release/savesync-daemon target/${{ matrix.target }}/release/savesync-app dist/savesync-steamos/
           cp packaging/install-steamos.sh dist/savesync-steamos/
+          cp packaging/verify-steamos.sh dist/savesync-steamos/
           cp packaging/systemd/savesync.service dist/savesync-steamos/systemd/
           mkdir -p dist/savesync-steamos/decky-plugin/dist
           cp decky-plugin/main.py decky-plugin/plugin.json decky-plugin/package.json dist/savesync-steamos/decky-plugin/

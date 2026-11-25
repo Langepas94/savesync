@@ -115,13 +115,18 @@ savesync-daemon manifests import /путь/к/savesync-manifests
 
 ### Steam Deck (SteamOS)
 
-1. Desktop Mode → `packaging/install-steamos.sh`: кладёт бинарь в
+1. Desktop Mode → `packaging/install-steamos.sh`: ставит daemon и приложение в
    `~/.local/bin`, регистрирует `systemctl --user enable --now
    savesync.service` (unit — `packaging/systemd/savesync.service`).
 2. (Опционально) Decky Loader → плагин SaveSync из `decky-plugin/`:
    шторка в Quick Access (статус, кнопка «Синхронизировать», баннер
    конфликта; резолвер конфликтов — в десктопном приложении).
-3. Установка только в home, без `sudo steamos-readonly disable`.
+3. Установка только в home, без `sudo steamos-readonly disable`. Обновление
+   сначала останавливает daemon/app, затем заменяет staged binaries. При ошибке
+   возвращает прежний пакет. Профиль сохраняется.
+4. Для Gaming Mode доступны Secret Service или [шифрованный vault](docs/OAUTH.md).
+   Read-only проверка настоящего устройства: `packaging/verify-steamos.sh`.
+   Реальные OAuth, два сетевых хоста и Decky QAM остаются физическим gate.
 
 ### Общее
 

@@ -12,9 +12,33 @@
 import asyncio
 import json
 import socket
+import os
+import struct
 
 SOCKET_ADDRESS = "\0savesync-daemon"
 RPC_TIMEOUT = 30  # sync большой библиотеки может занять секунды
+
+
+def _allowed_peer_uid(current: int, peer: int, deck_uid: int | None = None) -> bool:
+    return peer == current or peer == 0 or (current == 0 and peer == deck_uid)
+
+
+def _authorize_peer(sock) -> None:
+    """Authenticate the daemon before sending a pairing PIN to an abstract socket."""
+    credentials = sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
+    _, uid, _ = struct.unpack("3i", credentials)
+    deck_uid = None
+    if os.geteuid() == 0 and uid != 0:
+        try:
+            import decky
+            deck_uid = os.stat(decky.DECKY_USER_HOME).st_uid
+        except (ImportError, AttributeError, OSError):
+            try:
+                deck_uid = os.stat("/home/deck").st_uid
+            except OSError:
+                pass
+    if not _allowed_peer_uid(os.geteuid(), uid, deck_uid):
+        raise PermissionError("IPC daemon does not belong to the Deck user")
 
 
 def _rpc(method: str, params: dict | None = None) -> dict:
@@ -26,6 +50,7 @@ def _rpc(method: str, params: dict | None = None) -> dict:
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
         sock.settimeout(RPC_TIMEOUT)
         sock.connect(SOCKET_ADDRESS)
+        _authorize_peer(sock)
         sock.sendall((json.dumps(request) + "\n").encode("utf-8"))
 
         buf = b""
@@ -61,6 +86,16 @@ class Plugin:
         """Ручная синхронизация одной игры."""
         payload = await asyncio.to_thread(_rpc, "sync", {"game_key": game_key})
         return payload.get("data") or {}
+
+    async def lan_action(self, action: dict) -> dict:
+        """Pairing stays in the daemon; QAM only forwards explicit user choices."""
+        payload = await asyncio.to_thread(_rpc, "lan", {"action": action})
+        if payload.get("type") != "lan" or not isinstance(payload.get("data"), dict):
+            raise RuntimeError("daemon returned an incompatible LAN response")
+        data = payload["data"]
+        if data.get("error"):
+            raise RuntimeError(data["error"])
+        return data
 
     async def _main(self):
         # Точка входа Decky Loader: плагин загружен, ничего не поднимаем —

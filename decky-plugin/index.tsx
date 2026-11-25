@@ -15,6 +15,7 @@ import {
   staticClasses,
 } from "@decky/ui";
 import React, { useEffect, useState, VFC } from "react";
+import { LanPanel } from "./lan";
 
 // ── Типы ответов (зеркало crates/core/src/ipc.rs) ───────────────────
 
@@ -27,6 +28,7 @@ interface GameStatus {
 
 interface StatusPayload {
   daemon_version: string;
+  busy?: boolean;
   device_id: string;
   device_name: string;
   games: GameStatus[];
@@ -89,7 +91,7 @@ const Content: VFC = () => {
     try {
       const payload = await syncAll();
       const bad = (payload.results ?? []).filter(
-        (r) => r.outcome === "error" || r.outcome === "conflict"
+        (r) => !["uploaded", "applied", "up_to_date", "no_saves"].includes(r.outcome)
       );
       setNotice(
         bad.length === 0
@@ -127,8 +129,8 @@ const Content: VFC = () => {
     <>
       <PanelSection title={`◈ SaveSync · ${status?.device_name ?? ""}`}>
         <PanelSectionRow>
-          <ButtonItem layout="below" onClick={onSyncAll} disabled={busy}>
-            {busy ? "⟳ Синхронизация…" : "⇅ Синхронизировать"}
+          <ButtonItem layout="below" onClick={onSyncAll} disabled={busy || status?.busy}>
+            {busy || status?.busy ? "⟳ Синхронизация…" : "⇅ Синхронизировать"}
           </ButtonItem>
         </PanelSectionRow>
         {notice && (
@@ -158,6 +160,7 @@ const Content: VFC = () => {
         )}
       </PanelSection>
 
+      <LanPanel />
       <PanelSection title="Последние сейвы">
         {(status?.games ?? []).map((g) => {
           const st = STATE_ICON[g.state] ?? STATE_ICON.no_versions;

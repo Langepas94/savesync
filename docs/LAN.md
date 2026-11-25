@@ -67,3 +67,10 @@ PIN, отсутствие приглашения, подмену сертифи�
 Справка: [quinn](https://docs.rs/quinn/latest/quinn/),
 [SPAKE2](https://docs.rs/spake2/0.4.0/spake2/),
 [rustls verification](https://docs.rs/rustls/0.23.45/rustls/client/danger/trait.ServerCertVerifier.html).
+
+
+Decky QAM содержит те же invitation/PIN/SAS actions через Python-прокси.
+Конфликты по-прежнему разрешаются только в desktop app. IPC принимает текущего
+владельца профиля; Linux дополнительно допускает привилегированный Decky backend
+(root). Клиенты тоже проверяют владельца сервера до отправки PIN/config.
+Status остаётся доступным с `busy=true`, пока длительная операция выполняется.

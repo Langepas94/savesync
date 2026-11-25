@@ -87,6 +87,7 @@ impl Runtime {
             })
             .collect();
         ResponsePayload::Status(StatusPayload {
+            busy: false,
             daemon_version: env!("CARGO_PKG_VERSION").to_string(),
             device_id: self.config.device_id.clone(),
             device_name: self.config.device_name.clone(),

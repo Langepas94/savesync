@@ -27,6 +27,10 @@ use commands::{cmd_backup, cmd_custom, cmd_manifests, cmd_remote, cmd_serve};
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let code = match args.first().map(String::as_str) {
+        Some("--version") => {
+            println!("savesync-daemon {}", env!("CARGO_PKG_VERSION"));
+            0
+        }
         Some("serve") => cmd_serve(),
         Some("stop") => {
             if !ipc::probe(&savesync_core::ipc::client::socket_name()) {

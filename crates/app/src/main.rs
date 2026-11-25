@@ -10,6 +10,10 @@ mod theme;
 mod tray;
 use eframe::egui;
 fn main() -> eframe::Result<()> {
+    if std::env::args().any(|argument| argument == "--version") {
+        println!("savesync-app {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
     if std::env::args().any(|argument| argument == "--quit") {
         if lifecycle::request_exit().is_err() {
             std::process::exit(1);

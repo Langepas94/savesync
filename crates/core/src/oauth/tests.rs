@@ -172,8 +172,24 @@ fn callback(url: &url::Url, query: &str) -> String {
             format!("GET /oauth/callback?{query} HTTP/1.1\r\nHost: localhost\r\n\r\n").as_bytes(),
         )
         .unwrap();
+    use std::io::BufRead;
+    let mut reader = std::io::BufReader::new(socket);
     let mut response = String::new();
-    socket.read_to_string(&mut response).unwrap();
+    reader.read_line(&mut response).unwrap();
+    let mut length = None;
+    loop {
+        let mut line = String::new();
+        reader.read_line(&mut line).unwrap();
+        if line == "\r\n" {
+            break;
+        }
+        if let Some(value) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+            length = Some(value.trim().parse::<usize>().unwrap());
+        }
+    }
+    let mut body = vec![0; length.expect("callback response must declare its length")];
+    reader.read_exact(&mut body).unwrap();
+    response.push_str(&String::from_utf8(body).unwrap());
     response
 }
 #[test]
