@@ -97,7 +97,15 @@ fn sync_uploads_then_second_device_applies() {
     assert_eq!(results[0].outcome, "uploaded");
 
     let results = sync_results(deck.sync(None));
-    assert_eq!(results[0].outcome, "applied");
+    assert_eq!(results[0].outcome, "conflict");
+    let ResponsePayload::History(history) = deck.history("test-game") else {
+        panic!("expected history")
+    };
+    let remote = history.versions.iter().find(|v| v.device == "pc").unwrap();
+    assert_eq!(
+        sync_results(deck.restore("test-game", &remote.id))[0].outcome,
+        "applied"
+    );
     assert_eq!(world.save_of("deck"), "save of pc");
 
     // Повторный sync — ничего не изменилось.
@@ -112,7 +120,13 @@ fn sync_reports_conflict_without_resolving() {
     let mut deck = world.device("deck");
 
     pc.sync(None);
-    deck.sync(None); // deck получил базу
+    deck.sync(None);
+    let ResponsePayload::History(history) = deck.history("test-game") else {
+        panic!("expected history")
+    };
+    let remote = history.versions.iter().find(|v| v.device == "pc").unwrap();
+    deck.restore("test-game", &remote.id);
+    pc.sync(None);
 
     // Обе стороны расходятся от одной базы.
     std::fs::write(world.dir.join("pc/home/game/saves/slot1.sav"), "pc branch").unwrap();
@@ -128,6 +142,28 @@ fn sync_reports_conflict_without_resolving() {
     assert_eq!(results[0].outcome, "conflict");
     // Конфликт не разрешён молча: локальный сейв на месте.
     assert_eq!(world.save_of("deck"), "deck branch");
+}
+
+#[test]
+fn first_sync_keeps_different_local_saves_for_user_choice() {
+    let world = World::new("first-sync-conflict");
+    let mut pc = world.device("pc");
+    let mut deck = world.device("deck");
+    assert_eq!(sync_results(pc.sync(None))[0].outcome, "uploaded");
+    assert_eq!(sync_results(deck.sync(None))[0].outcome, "conflict");
+    assert_eq!(world.save_of("deck"), "save of deck");
+    let ResponsePayload::History(history) = deck.history("test-game") else {
+        panic!("expected history")
+    };
+    assert_eq!(history.heads.len(), 2);
+    assert_eq!(history.local_files.len(), 1);
+    assert!(history.local_files[0].path.ends_with("slot1.sav"));
+    let pc_version = history.versions.iter().find(|v| v.device == "pc").unwrap();
+    assert_eq!(
+        sync_results(deck.restore("test-game", &pc_version.id))[0].outcome,
+        "applied"
+    );
+    assert_eq!(world.save_of("deck"), "save of pc");
 }
 
 #[test]

@@ -157,11 +157,20 @@ pub struct OAuthStatusPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HistoryPayload {
     pub game_key: String,
+    #[serde(default)]
+    pub local_files: Vec<LocalSaveFile>,
     pub versions: Vec<VersionEntry>,
     /// Применённая на этом устройстве версия.
     pub applied: Option<String>,
     /// «Головы» линии (больше одной = конфликт).
     pub heads: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocalSaveFile {
+    pub path: String,
+    pub size: u64,
+    pub modified_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

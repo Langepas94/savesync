@@ -52,7 +52,7 @@ pub(crate) fn state_badge(ui: &mut egui::Ui, state: &str) {
     let (text, color) = match state {
         "ok" => ("синхронизировано", OK),
         "conflict" => ("конфликт", WARN),
-        "no_versions" => ("нет версий", DIM),
+        "no_versions" => ("найдены файлы, история пуста", DIM),
         "no_saves" => ("сохранения не найдены", DIM),
         other => (other, DIM),
     };

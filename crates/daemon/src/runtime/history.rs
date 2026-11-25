@@ -30,6 +30,29 @@ impl Runtime {
         };
         ResponsePayload::History(HistoryPayload {
             game_key: game_key.to_string(),
+            local_files: self
+                .last_scan
+                .iter()
+                .find(|game| game.game_key == game_key)
+                .into_iter()
+                .flat_map(|game| &game.locations)
+                .flat_map(|location| &location.hits)
+                .filter_map(|path| {
+                    let metadata = std::fs::metadata(path).ok()?;
+                    if !metadata.is_file() {
+                        return None;
+                    }
+                    Some(savesync_core::ipc::LocalSaveFile {
+                        path: path.to_string_lossy().into_owned(),
+                        size: metadata.len(),
+                        modified_at: metadata
+                            .modified()
+                            .ok()
+                            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                            .map(|time| time.as_millis().min(u64::MAX as u128) as u64),
+                    })
+                })
+                .collect(),
             versions,
             applied: applied.get(game_key).cloned(),
             heads,

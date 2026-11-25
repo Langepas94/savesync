@@ -218,6 +218,7 @@ fn late_history_cannot_replace_selected_game_history() {
     app.selected = Some("second".into());
     let history = |key: &str| HistoryPayload {
         game_key: key.into(),
+        local_files: vec![],
         versions: vec![],
         applied: None,
         heads: vec![],
@@ -299,6 +300,7 @@ fn applied_conflict_branch_can_be_selected_in_game_view() {
     app.selected = Some("test-game".into());
     app.history = Some(HistoryPayload {
         game_key: "test-game".into(),
+        local_files: vec![],
         applied: Some("local-version".into()),
         heads: vec!["local-version".into(), "remote-version".into()],
         versions: vec![VersionEntry {

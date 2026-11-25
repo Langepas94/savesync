@@ -346,6 +346,30 @@ impl SaveSyncApp {
             return;
         }
 
+        ui.heading("Сохранения на этом устройстве");
+        if h.local_files.is_empty() {
+            ui.label(RichText::new("Файлы сохранений не найдены.").color(DIM));
+        } else {
+            egui::ScrollArea::vertical()
+                .id_salt("local_save_files")
+                .max_height(140.0)
+                .show(ui, |ui| {
+                    for file in &h.local_files {
+                        ui.label(&file.path);
+                        let modified = file
+                            .modified_at
+                            .map(|time| format!("{} UTC", fmt_ts(time)))
+                            .unwrap_or_else(|| "время неизвестно".into());
+                        ui.small(format!("{} байт · {}", file.size, modified));
+                    }
+                });
+        }
+        ui.separator();
+        ui.heading("История синхронизации");
+        if h.versions.is_empty() {
+            ui.label(RichText::new("На этом устройстве ещё нет снимков. Доступные на других устройствах версии появятся после синхронизации.").color(DIM));
+        }
+
         // Конфликт-резолвер: больше одной головы.
         if h.heads.len() > 1 {
             egui::Frame::group(ui.style())

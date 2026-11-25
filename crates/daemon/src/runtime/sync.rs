@@ -133,59 +133,7 @@ fn sync_one(
         );
     }
 
-    // Устройство, никогда не синхронизировавшее игру, принимает удалённую
-    // линию версий целиком: push своего состояния как нового корня был бы
-    // ложным ветвлением. Локальные сейвы сохраняются авто-бэкапом при pull.
-    match (
-        engine.has_local_versions(&game.game_key),
-        engine.has_remote_versions(&game.game_key),
-    ) {
-        (Ok(false), Ok(true)) => {
-            return with_channel(
-                channel,
-                match engine.pull(manifest, roots, platform) {
-                    Ok(PullOutcome::Applied { version, .. }) => SyncResult {
-                        game_key: game.game_key.clone(),
-                        outcome: "applied".into(),
-                        detail: Some(version),
-                    },
-                    Ok(PullOutcome::UpToDate) => SyncResult {
-                        game_key: game.game_key.clone(),
-                        outcome: "up_to_date".into(),
-                        detail: None,
-                    },
-                    Ok(PullOutcome::Conflict(heads)) => SyncResult {
-                        game_key: game.game_key.clone(),
-                        outcome: "conflict".into(),
-                        detail: Some(heads.join(", ")),
-                    },
-                    Ok(PullOutcome::NoRemoteVersion) => unreachable!("remote checked above"),
-                    Ok(PullOutcome::Locked(holder)) => SyncResult {
-                        game_key: game.game_key.clone(),
-                        outcome: "locked".into(),
-                        detail: Some(holder),
-                    },
-                    Err(e) => SyncResult {
-                        game_key: game.game_key.clone(),
-                        outcome: "error".into(),
-                        detail: Some(e.to_string()),
-                    },
-                },
-            );
-        }
-        (Err(e), _) => {
-            return with_channel(
-                channel,
-                SyncResult {
-                    game_key: game.game_key.clone(),
-                    outcome: "error".into(),
-                    detail: Some(e.to_string()),
-                },
-            );
-        }
-        _ => {}
-    }
-
+    // Preserve independent local saves as a separate branch on first sync.
     let push = engine.push(&game.game_key, &game.locations);
     match &push {
         Err(e) => {
