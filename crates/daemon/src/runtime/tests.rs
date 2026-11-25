@@ -49,6 +49,7 @@ impl World {
             last_scan: Vec::new(),
             lan_server: None,
             serving: false,
+            oauth_jobs: Default::default(),
         }
     }
 
@@ -385,4 +386,22 @@ fn unreadable_source_links_never_publish_a_readable_subset() {
     std::os::unix::fs::symlink(&outside, world.dir.join("pc/home/game/saves/nested")).unwrap();
     assert_eq!(sync_results(pc.sync(Some("test-game")))[0].outcome, "error");
     assert!(!world.dir.join("remote/saves").exists());
+}
+
+#[test]
+fn inaccessible_cloud_does_not_disable_filesystem_channel() {
+    let world = World::new("oauth-independent");
+    let mut runtime = world.device("pc");
+    runtime.config.backends.google = Some(savesync_core::config::GoogleConfig {
+        token: "keyring:invalid".into(),
+    });
+    let results = sync_results(runtime.sync(None));
+    assert!(results.iter().any(|result| result.outcome == "uploaded"
+        && result.detail.as_deref().unwrap_or("").contains("[fs]")));
+    assert!(results.iter().any(|result| result.outcome == "error"
+        && result
+            .detail
+            .as_deref()
+            .unwrap_or("")
+            .contains("[google-drive]")));
 }

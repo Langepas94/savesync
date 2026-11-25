@@ -7,7 +7,6 @@ use std::path::PathBuf;
 use savesync_core::backend::{Backend, FsBackend};
 use savesync_core::config::Config;
 use savesync_core::engine::{Engine, PullOutcome, PushOutcome};
-use savesync_core::gdrive::GoogleDrive;
 use savesync_core::ipc::{
     GameStatus, ResponsePayload, ScanPayload, ScannedGame, StatusPayload, SyncPayload, SyncResult,
 };
@@ -15,7 +14,6 @@ use savesync_core::lan::LanBackend;
 use savesync_core::manifest::{Manifest, ManifestDb};
 use savesync_core::paths::{Platform, Roots};
 use savesync_core::scanner::{self, FoundGame};
-use savesync_core::yandex::YandexDisk;
 
 pub struct Runtime {
     pub config: Config,
@@ -27,6 +25,8 @@ pub struct Runtime {
     pub last_scan: Vec<FoundGame>,
     pub lan_server: Option<savesync_core::lan::LanServer>,
     pub serving: bool,
+    pub oauth_jobs:
+        std::collections::HashMap<savesync_core::oauth::Provider, authorization::OAuthJob>,
 }
 
 impl Runtime {
@@ -77,6 +77,7 @@ impl Runtime {
             last_scan: Vec::new(),
             lan_server: None,
             serving: false,
+            oauth_jobs: Default::default(),
         };
         runtime.refresh_catalog();
         Ok(runtime)
@@ -91,3 +92,5 @@ mod scheduled_backups;
 mod sync;
 #[cfg(test)]
 mod tests;
+
+mod authorization;

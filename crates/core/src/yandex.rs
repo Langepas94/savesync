@@ -58,13 +58,28 @@ impl YandexDisk {
     }
 
     fn api_error(&self, op: &str, err: ureq::Error) -> io::Error {
+        if matches!(&err, ureq::Error::Status(401, _)) {
+            return io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                crate::credential_backend::TokenExpired,
+            );
+        }
         let kind = match &err {
             ureq::Error::Status(401 | 403, _) => io::ErrorKind::PermissionDenied,
             ureq::Error::Status(404, _) => io::ErrorKind::NotFound,
             ureq::Error::Status(_, _) => io::ErrorKind::Other,
             ureq::Error::Transport(_) => io::ErrorKind::ConnectionAborted,
         };
-        io::Error::new(kind, format!("yandex disk {op}: {err}"))
+        io::Error::new(
+            kind,
+            format!(
+                "yandex disk {op}: {}",
+                match err {
+                    ureq::Error::Status(status, _) => format!("HTTP {status}"),
+                    _ => "transport failure".into(),
+                }
+            ),
+        )
     }
 
     /// GET JSON с query-параметрами.

@@ -18,6 +18,7 @@ mod settings;
 mod tests;
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
 struct JobDone {
+    oauth_started: Option<savesync_core::oauth::Provider>,
     config: Option<Config>,
     msg: Result<String, String>,
     refresh_status: bool,
@@ -37,6 +38,7 @@ enum Tab {
 }
 
 pub(crate) struct SaveSyncApp {
+    oauth_pending: Option<savesync_core::oauth::Provider>,
     client: Arc<dyn DaemonClient>,
     tab: Tab,
     daemon_ok: bool,
@@ -55,6 +57,7 @@ pub(crate) struct SaveSyncApp {
 impl SaveSyncApp {
     pub(crate) fn new() -> Self {
         SaveSyncApp {
+            oauth_pending: None,
             client: Arc::new(IpcDaemonClient),
             tab: Tab::Games,
             daemon_ok: false,
@@ -83,8 +86,36 @@ impl SaveSyncApp {
         let (tx, rx) = mpsc::channel();
         let client = self.client.clone();
         std::thread::spawn(move || {
-            let done = match client.request(method) {
+            let response = client.request(method).and_then(|payload| {
+                if let ResponsePayload::OAuthStart(start) = &payload {
+                    let url = url::Url::parse(&start.authorization_url)
+                        .map_err(|_| "Некорректный OAuth URL".to_string())?;
+                    if url.scheme() != "https"
+                        || !matches!(
+                            url.host_str(),
+                            Some("accounts.google.com" | "oauth.yandex.ru")
+                        )
+                    {
+                        return Err("Недопустимый OAuth URL".into());
+                    }
+                    if webbrowser::open(&start.authorization_url).is_err() {
+                        let _ = client.request(Method::OAuthCancel {
+                            provider: start.provider,
+                        });
+                        return Err(
+                            "Не удалось открыть браузер; повторите remote login из CLI".into()
+                        );
+                    }
+                }
+                Ok(payload)
+            });
+            let done = match response {
                 Ok(payload) => {
+                    let oauth_started = if let ResponsePayload::OAuthStart(start) = &payload {
+                        Some(start.provider)
+                    } else {
+                        None
+                    };
                     let config = if let ResponsePayload::Config(response) = &payload {
                         Some(response.config.clone())
                     } else {
@@ -92,6 +123,7 @@ impl SaveSyncApp {
                     };
                     let (msg, rs, rh) = map(payload);
                     JobDone {
+                        oauth_started,
                         config,
                         msg: Ok(msg),
                         refresh_status: rs,
@@ -99,6 +131,7 @@ impl SaveSyncApp {
                     }
                 }
                 Err(e) => JobDone {
+                    oauth_started: None,
                     config: None,
                     msg: Err(e),
                     refresh_status: true,
@@ -163,6 +196,43 @@ impl SaveSyncApp {
             };
             (message, true, false)
         });
+    }
+
+    fn begin_oauth(&mut self, provider: savesync_core::oauth::Provider) {
+        self.start_job(
+            "Подключение облака…",
+            Method::OAuthBegin { provider },
+            |_| ("Завершите вход в системном браузере".into(), false, false),
+        );
+    }
+    fn cancel_oauth(&mut self, provider: savesync_core::oauth::Provider) {
+        self.start_job(
+            "Отмена входа…",
+            Method::OAuthCancel { provider },
+            |_| ("Вход отменён".into(), false, false),
+        );
+        self.oauth_pending = None;
+    }
+    fn poll_oauth(&mut self) {
+        let Some(provider) = self.oauth_pending else {
+            return;
+        };
+        match self.client.request(Method::OAuthPoll { provider }) {
+            Ok(ResponsePayload::OAuthStatus(status)) if status.state == "connected" => {
+                self.oauth_pending = None;
+                self.cfg = None;
+                self.form_loaded = false;
+                self.set_notice("Облако подключено".into(), false);
+            }
+            Ok(ResponsePayload::OAuthStatus(status)) if status.state == "idle" => {
+                self.oauth_pending = None;
+            }
+            Err(error) => {
+                self.oauth_pending = None;
+                self.set_notice(error, true);
+            }
+            _ => (),
+        }
     }
 
     fn sync_all(&mut self) {
@@ -239,6 +309,7 @@ impl eframe::App for SaveSyncApp {
         // Периодический опрос демона (быстрый локальный RPC).
         if self.job.is_none() && self.last_poll.elapsed() >= POLL_INTERVAL {
             self.poll_status();
+            self.poll_oauth();
             self.ensure_config();
             self.last_poll = Instant::now();
         }
@@ -252,6 +323,9 @@ impl eframe::App for SaveSyncApp {
         }
         if let Some(done) = job_done {
             self.job = None;
+            if let Some(provider) = done.oauth_started {
+                self.oauth_pending = Some(provider);
+            }
             if let Some(config) = done.config {
                 self.form = ConfigForm::from_config(&config);
                 self.cfg = Some(config);

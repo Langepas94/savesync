@@ -23,3 +23,7 @@ Thumbs.db
 /decky-plugin/node_modules/
 /decky-plugin/dist/
 **/__pycache__/
+
+# Local OAuth application configuration
+oauth-apps.json
+.env

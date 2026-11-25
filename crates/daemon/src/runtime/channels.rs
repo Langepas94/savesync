@@ -13,14 +13,20 @@ impl Runtime {
         }
         if let Some(ya) = &self.config.backends.yandex {
             out.push(Engine::new(
-                Box::new(YandexDisk::new(&ya.token)) as Box<dyn Backend>,
+                savesync_core::credential_backend::CredentialBackend::connect(
+                    savesync_core::oauth::Provider::Yandex,
+                    &ya.token,
+                ),
                 self.config.device_id.clone(),
                 self.state_dir.clone(),
             ));
         }
         if let Some(gg) = &self.config.backends.google {
             out.push(Engine::new(
-                Box::new(GoogleDrive::new(&gg.token)) as Box<dyn Backend>,
+                savesync_core::credential_backend::CredentialBackend::connect(
+                    savesync_core::oauth::Provider::Google,
+                    &gg.token,
+                ),
                 self.config.device_id.clone(),
                 self.state_dir.clone(),
             ));

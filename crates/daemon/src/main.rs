@@ -47,7 +47,7 @@ fn main() {
         Some("backup") => cmd_backup(&args[1..]),
         _ => {
             eprintln!(
-                "savesync-daemon {}\nкоманды: serve | status | scan | sync [game_key] | history <game_key> | restore <game_key> <version_id> | custom <add|list|remove> | remote <setup|peer|list> | backup <create|list|import|dir>",
+                "savesync-daemon {}\nкоманды: serve | status | scan | sync [game_key] | history <game_key> | restore <game_key> <version_id> | custom <add|list|remove> | remote <login|logout|setup|peer|list> | backup <create|list|import|dir>",
                 env!("CARGO_PKG_VERSION")
             );
             2
@@ -108,6 +108,9 @@ fn cmd_via_daemon_or_direct(method: Method) -> i32 {
     let payload = match &method {
         Method::Scan => rt.scan(),
         Method::ReloadManifests => rt.reload_manifests(),
+        Method::OAuthBegin { provider } => rt.oauth_begin(*provider),
+        Method::OAuthPoll { provider } => rt.oauth_poll(*provider),
+        Method::OAuthCancel { provider } => rt.oauth_cancel(*provider),
         Method::Sync { game_key } => rt.sync(game_key.as_deref()),
         Method::Status => rt.status(),
         Method::History { game_key } => rt.history(game_key),
@@ -146,6 +149,7 @@ fn print_payload(payload: &ResponsePayload) {
 
 fn payload_exit_code(payload: &ResponsePayload) -> i32 {
     match payload {
+        ResponsePayload::OAuthStatus(status) if status.state == "error" => 1,
         ResponsePayload::Sync(sync)
             if sync.results.iter().any(|result| {
                 matches!(

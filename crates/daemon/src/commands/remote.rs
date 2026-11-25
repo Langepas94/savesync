@@ -4,6 +4,12 @@
 use super::*;
 pub(crate) fn cmd_remote(args: &[String]) -> i32 {
     use savesync_core::config::{GoogleConfig, YandexConfig};
+    if args.first().is_some_and(|arg| arg == "login") {
+        return super::authorization::login(&args[1..]);
+    }
+    if args.first().is_some_and(|arg| arg == "logout") {
+        return super::authorization::logout(&args[1..]);
+    }
 
     let path = config_path();
     let mut config = match Config::load_or_init(&path) {
@@ -122,21 +128,12 @@ pub(crate) fn cmd_remote(args: &[String]) -> i32 {
         _ => return usage_remote(),
     }
 
-    match config.save(&path) {
-        Ok(()) => {
-            println!("канал сохранён");
-            0
-        }
-        Err(e) => {
-            eprintln!("ошибка записи конфига: {e}");
-            1
-        }
-    }
+    super::authorization::save_config(config)
 }
 
 fn usage_remote() -> i32 {
     eprintln!(
-        "использование:\n  \
+        "использование:\n  remote login <google|yandex> — вход через браузер\n  remote logout <google|yandex> — отключить облако\n  \
          remote setup fs <путь>      — файловый канал (папка/USB)\n  \
          remote setup fs-off         — отключить файловый канал\n  \
          remote setup yandex <токен> — Яндекс.Диск (OAuth-токен)\n  \

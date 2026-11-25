@@ -41,6 +41,8 @@ def run(binary: Path) -> None:
             environment.update(APPDATA=str(appdata), LOCALAPPDATA=str(root / device / "localappdata"), XDG_DATA_HOME=str(appdata), XDG_CONFIG_HOME=str(root / device / "config"),
                                HOME=str(home), USERPROFILE=str(home),
                                SAVESYNC_SOCKET=namespace + "-" + device, SAVESYNC_STEAM_ROOT=str(root / "empty-steam"))
+            for key in ("SAVESYNC_GOOGLE_CLIENT_ID", "SAVESYNC_GOOGLE_CLIENT_SECRET", "SAVESYNC_YANDEX_CLIENT_ID", "SAVESYNC_YANDEX_CLIENT_SECRET"):
+                environment.pop(key, None)
             environments[device] = environment
 
         def command(device, *args, expect=0, parse=True):
@@ -57,6 +59,7 @@ def run(binary: Path) -> None:
             assert payload["data"]["results"][0]["outcome"] == expected, payload
             return payload
 
+        command("pc", "remote", "login", "google", expect=1, parse=False)
         scan = command("pc", "scan")
         assert scan["data"]["found"] == 1, scan
         outcome("pc", "uploaded", "sync", "smoke-game")
@@ -114,6 +117,8 @@ def run(binary: Path) -> None:
                     time.sleep(0.1)
                 else:
                     raise AssertionError("isolated IPC did not become ready")
+                command("pc", "remote", "login", "yandex", expect=1, parse=False)
+                command("pc", "remote", "setup", "fs", str(root / "remote"))
                 status = json.loads(result.stdout)
                 assert status["data"]["device_id"] == "pc"
                 assert len(status["data"]["games"]) == 2

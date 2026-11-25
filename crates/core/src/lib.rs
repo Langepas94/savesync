@@ -16,11 +16,14 @@ pub mod storage_paths;
 pub mod backend;
 pub mod backup;
 pub mod config;
+pub mod credential_backend;
+pub mod credentials;
 pub mod engine;
 pub mod gdrive;
 pub mod index;
 pub mod ipc;
 pub mod lan;
+pub mod oauth;
 pub mod yandex;
 
 pub mod bundled_manifests;
