@@ -126,3 +126,33 @@ fn removing_cloud_config_removes_its_credentials_after_commit() {
     config.save_with_store(&path, &store).unwrap();
     assert!(store.values.lock().unwrap().is_empty());
 }
+
+#[test]
+fn stale_form_cannot_replace_working_credentials() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("config.json");
+    let mut config = crate::config::Config::load_or_init(&path).unwrap();
+    let store = MemoryStore::default();
+    config.backends.google = Some(crate::config::GoogleConfig {
+        token: "first".into(),
+    });
+    config.save_with_store(&path, &store).unwrap();
+    let stale = crate::config::Config::load(&path).unwrap().unwrap();
+    config.backends.google = Some(crate::config::GoogleConfig {
+        token: "second".into(),
+    });
+    config.save_with_store(&path, &store).unwrap();
+    let active = crate::config::Config::load(&path).unwrap().unwrap();
+    assert!(stale.save_with_store(&path, &store).is_err());
+    assert_eq!(crate::config::Config::load(&path).unwrap().unwrap(), active);
+    assert_eq!(
+        load(
+            &store,
+            &active.backends.google.unwrap().token,
+            Provider::Google
+        )
+        .unwrap()
+        .access_token,
+        "second"
+    );
+}

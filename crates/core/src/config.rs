@@ -147,7 +147,46 @@ impl Config {
         path: &Path,
         store: &dyn crate::credentials::SecretStore,
     ) -> io::Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let lock = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(path.with_extension("json.lock"))?;
+        fs2::FileExt::lock_exclusive(&lock)?;
         let old = Self::load(path)?;
+        // A stale UI must not replace a live credential with a deleted reference.
+        for (provider, new_ref, old_ref) in [
+            (
+                crate::oauth::Provider::Google,
+                self.backends
+                    .google
+                    .as_ref()
+                    .map(|value| value.token.as_str()),
+                old.as_ref()
+                    .and_then(|config| config.backends.google.as_ref())
+                    .map(|value| value.token.as_str()),
+            ),
+            (
+                crate::oauth::Provider::Yandex,
+                self.backends
+                    .yandex
+                    .as_ref()
+                    .map(|value| value.token.as_str()),
+                old.as_ref()
+                    .and_then(|config| config.backends.yandex.as_ref())
+                    .map(|value| value.token.as_str()),
+            ),
+        ] {
+            if let Some(reference) = new_ref.filter(|reference| {
+                crate::credentials::is_reference(reference) && Some(*reference) != old_ref
+            }) {
+                crate::credentials::load(store,reference,provider).map_err(|_|io::Error::new(io::ErrorKind::PermissionDenied,"credential reference is unavailable or stale; reload settings and sign in again"))?;
+            }
+        }
         let secured = crate::credentials::secure_config(self, store)?;
         let result = (|| {
             if let Some(parent) = path.parent() {

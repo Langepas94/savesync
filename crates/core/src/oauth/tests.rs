@@ -167,11 +167,11 @@ fn callback(url: &url::Url, query: &str) -> String {
     socket
         .set_read_timeout(Some(Duration::from_secs(5)))
         .unwrap();
-    write!(
-        socket,
-        "GET /oauth/callback?{query} HTTP/1.1\r\nHost: localhost\r\n\r\n"
-    )
-    .unwrap();
+    socket
+        .write_all(
+            format!("GET /oauth/callback?{query} HTTP/1.1\r\nHost: localhost\r\n\r\n").as_bytes(),
+        )
+        .unwrap();
     let mut response = String::new();
     socket.read_to_string(&mut response).unwrap();
     response
