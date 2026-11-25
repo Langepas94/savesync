@@ -9,7 +9,11 @@ impl Runtime {
                 match action {
                     LanAction::Status => (),
                     LanAction::Discover => {
-                        payload.discovered = lan::discover(std::time::Duration::from_secs(2))?
+                        let identity = lan::local_identity(&directory)?;
+                        payload.discovered = lan::discover(std::time::Duration::from_secs(5))?
+                            .into_iter()
+                            .filter(|peer| peer.identity != identity)
+                            .collect();
                     }
                     LanAction::Invite => {
                         let server = self

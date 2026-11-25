@@ -81,6 +81,13 @@ impl SaveSyncApp {
                 ui.label(RichText::new("LAN (прямая синхронизация по сети)").strong());
                 ui.checkbox(&mut self.form.lan_enabled, "включить LAN-канал");
                 if self.form.lan_enabled {
+                    ui.label(
+                        RichText::new(
+                            "Кнопки поиска и сопряжения сохраняют настройки LAN автоматически.",
+                        )
+                        .color(DIM)
+                        .small(),
+                    );
                     ui.horizontal(|ui| {
                         ui.label("Порт:");
                         ui.add(
@@ -211,6 +218,11 @@ impl SaveSyncApp {
             }
         });
         if let Some(status) = self.lan.clone() {
+            if let Some(port) = status.port {
+                ui.label(format!("LAN работает, UDP-порт: {port}"));
+            } else {
+                ui.label("LAN-сервер пока не запущен. Нажмите поиск или показ PIN для включения.");
+            }
             if let Some(pin) = status.invitation_pin {
                 ui.label(format!(
                     "PIN: {pin}. Введите на другом устройстве. Не используйте повторно."

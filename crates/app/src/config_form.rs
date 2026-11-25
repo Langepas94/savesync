@@ -80,23 +80,7 @@ impl ConfigForm {
         c.backends.google = (!trimmed(&self.google_token).is_empty()).then(|| GoogleConfig {
             token: trimmed(&self.google_token),
         });
-        c.backends.lan = if self.lan_enabled {
-            let port: u16 = trimmed(&self.lan_port)
-                .parse()
-                .map_err(|_| "LAN: порт должен быть числом 1-65535".to_string())?;
-            let peers = trimmed(&self.lan_peers)
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-            Some(LanConfig {
-                port,
-                pin: trimmed(&self.lan_pin),
-                peers,
-            })
-        } else {
-            None
-        };
+        self.apply_lan_to(c)?;
         c.backups.dir = (!trimmed(&self.backups_dir).is_empty())
             .then(|| std::path::PathBuf::from(trimmed(&self.backups_dir)));
         c.backups.keep = if trimmed(&self.backups_keep).is_empty() {
@@ -116,6 +100,28 @@ impl ConfigForm {
                     .parse()
                     .map_err(|_| "Бэкапы: интервал должен быть числом часов".to_string())?,
             )
+        };
+        Ok(())
+    }
+
+    pub(crate) fn apply_lan_to(&self, c: &mut Config) -> Result<(), String> {
+        let trimmed = |s: &str| s.trim().to_string();
+        c.backends.lan = if self.lan_enabled {
+            let port: u16 = trimmed(&self.lan_port)
+                .parse()
+                .map_err(|_| "LAN: порт должен быть числом 1-65535".to_string())?;
+            let peers = trimmed(&self.lan_peers)
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            Some(LanConfig {
+                port,
+                pin: trimmed(&self.lan_pin),
+                peers,
+            })
+        } else {
+            None
         };
         Ok(())
     }

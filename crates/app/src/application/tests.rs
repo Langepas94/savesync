@@ -357,3 +357,108 @@ fn applied_conflict_branch_can_be_selected_in_game_view() {
         }
     );
 }
+
+#[test]
+fn lan_buttons_save_pending_lan_before_request_and_preserve_other_edits() {
+    use savesync_core::{
+        ipc::ConfigPayload,
+        lan::{LanAction, LanPayload},
+    };
+    struct Fake {
+        requests: mpsc::Sender<Method>,
+        fail_save: bool,
+    }
+    impl DaemonClient for Fake {
+        fn request(&self, method: Method) -> Result<ResponsePayload, String> {
+            self.requests.send(method.clone()).unwrap();
+            match method {
+                Method::SaveConfig { config } if !self.fail_save => {
+                    Ok(ResponsePayload::Config(ConfigPayload { config: *config }))
+                }
+                Method::SaveConfig { .. } => Err("port occupied".into()),
+                Method::Lan { .. } => Ok(ResponsePayload::Lan(LanPayload {
+                    port: Some(47660),
+                    ..Default::default()
+                })),
+                _ => panic!("unexpected request"),
+            }
+        }
+    }
+    for action in [LanAction::Discover, LanAction::Invite] {
+        for fail_save in [false, true] {
+            let config = Config {
+                version: 1,
+                device_id: "test".into(),
+                device_name: "Test".into(),
+                manifests_dir: None,
+                backends: Default::default(),
+                backups: Default::default(),
+            };
+            let (sent, received) = mpsc::channel();
+            let mut app = SaveSyncApp::new();
+            app.accept_config(config.clone(), false);
+            app.form.lan_enabled = true;
+            app.form.fs_path = "D:/unsaved-edit".into();
+            app.form.backups_keep = "invalid unsaved value".into();
+            app.client = Arc::new(Fake {
+                requests: sent,
+                fail_save,
+            });
+            app.lan_action(action.clone());
+            let done = app
+                .job
+                .take()
+                .unwrap()
+                .rx
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap();
+            let Method::SaveConfig { config: saved } = received.recv().unwrap() else {
+                panic!("LAN must be saved first");
+            };
+            assert_eq!(saved.backends.lan.as_ref().unwrap().port, 47660);
+            assert_eq!(saved.backends.fs_path, config.backends.fs_path);
+            assert_eq!(saved.backups, config.backups);
+            if fail_save {
+                assert_eq!(done.msg.unwrap_err(), "port occupied");
+                assert!(received.try_recv().is_err());
+                continue;
+            }
+            assert_eq!(
+                received.recv().unwrap(),
+                Method::Lan {
+                    action: action.clone()
+                }
+            );
+            assert!(received.try_recv().is_err());
+            assert!(done.msg.is_ok());
+            if action == LanAction::Discover {
+                assert!(done.msg.unwrap().contains("Устройства не найдены"));
+            }
+            app.accept_config(done.config.unwrap(), done.lan_config_only);
+            assert!(app.cfg.as_ref().unwrap().backends.lan.is_some());
+            assert_eq!(app.form.fs_path, "D:/unsaved-edit");
+            assert_eq!(app.form.backups_keep, "invalid unsaved value");
+        }
+    }
+}
+
+#[test]
+fn lan_rejects_invalid_pending_port_before_rpc() {
+    let mut app = SaveSyncApp::new();
+    app.accept_config(
+        Config {
+            version: 1,
+            device_id: "test".into(),
+            device_name: "Test".into(),
+            manifests_dir: None,
+            backends: Default::default(),
+            backups: Default::default(),
+        },
+        false,
+    );
+    app.form.lan_enabled = true;
+    app.form.lan_port = "invalid".into();
+    app.lan_action(savesync_core::lan::LanAction::Invite);
+    assert!(app.job.is_none());
+    assert!(app.notice.as_ref().unwrap().1);
+}

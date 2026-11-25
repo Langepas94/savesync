@@ -23,6 +23,7 @@ struct JobDone {
     lan: Option<savesync_core::lan::LanPayload>,
     oauth_started: Option<savesync_core::oauth::Provider>,
     config: Option<Config>,
+    lan_config_only: bool,
     msg: Result<String, String>,
     refresh_status: bool,
     refresh_history: bool,
@@ -166,38 +167,69 @@ impl SaveSyncApp {
     where
         F: FnOnce(ResponsePayload) -> (String, bool, bool) + Send + 'static,
     {
+        self.start_job_with_lan_config(desc, method, None, map);
+    }
+
+    fn start_job_with_lan_config<F>(
+        &mut self,
+        desc: &str,
+        method: Method,
+        lan_config: Option<Config>,
+        map: F,
+    ) where
+        F: FnOnce(ResponsePayload) -> (String, bool, bool) + Send + 'static,
+    {
         let (tx, rx) = mpsc::channel();
         let client = self.client.clone();
         std::thread::spawn(move || {
+            let lan_config_only = matches!(&method, Method::Lan { .. });
+            let mut saved_config = None;
+            let prepared = if let Some(config) = lan_config {
+                client
+                    .request(Method::SaveConfig {
+                        config: Box::new(config),
+                    })
+                    .and_then(|payload| match payload {
+                        ResponsePayload::Config(response) => {
+                            saved_config = Some(response.config);
+                            Ok(())
+                        }
+                        _ => Err("Демон не подтвердил включение LAN".into()),
+                    })
+            } else {
+                Ok(())
+            };
             let refresh_lan_config = matches!(
                 &method,
                 Method::Lan {
                     action: savesync_core::lan::LanAction::Confirm { .. }
                 }
             );
-            let response = client.request(method).and_then(|payload| {
-                if let ResponsePayload::OAuthStart(start) = &payload {
-                    let url = url::Url::parse(&start.authorization_url)
-                        .map_err(|_| "Некорректный OAuth URL".to_string())?;
-                    if url.scheme() != "https"
-                        || !matches!(
-                            url.host_str(),
-                            Some("accounts.google.com" | "oauth.yandex.ru")
-                        )
-                    {
-                        return Err("Недопустимый OAuth URL".into());
+            let response = prepared
+                .and_then(|()| client.request(method))
+                .and_then(|payload| {
+                    if let ResponsePayload::OAuthStart(start) = &payload {
+                        let url = url::Url::parse(&start.authorization_url)
+                            .map_err(|_| "Некорректный OAuth URL".to_string())?;
+                        if url.scheme() != "https"
+                            || !matches!(
+                                url.host_str(),
+                                Some("accounts.google.com" | "oauth.yandex.ru")
+                            )
+                        {
+                            return Err("Недопустимый OAuth URL".into());
+                        }
+                        if webbrowser::open(&start.authorization_url).is_err() {
+                            let _ = client.request(Method::OAuthCancel {
+                                provider: start.provider,
+                            });
+                            return Err(
+                                "Не удалось открыть браузер; повторите remote login из CLI".into(),
+                            );
+                        }
                     }
-                    if webbrowser::open(&start.authorization_url).is_err() {
-                        let _ = client.request(Method::OAuthCancel {
-                            provider: start.provider,
-                        });
-                        return Err(
-                            "Не удалось открыть браузер; повторите remote login из CLI".into()
-                        );
-                    }
-                }
-                Ok(payload)
-            });
+                    Ok(payload)
+                });
             let done = match response {
                 Ok(payload) => {
                     let oauth_started = if let ResponsePayload::OAuthStart(start) = &payload {
@@ -233,7 +265,7 @@ impl SaveSyncApp {
                     } else if let ResponsePayload::Config(response) = &payload {
                         Some(response.config.clone())
                     } else {
-                        None
+                        saved_config.clone()
                     };
                     let (msg, rs, rh) = map(payload);
                     JobDone {
@@ -241,6 +273,7 @@ impl SaveSyncApp {
                         lan,
                         oauth_started,
                         config,
+                        lan_config_only,
                         msg: config_error.map_or(Ok(msg), Err),
                         refresh_status: rs,
                         refresh_history: rh,
@@ -250,7 +283,8 @@ impl SaveSyncApp {
                     history: None,
                     lan: None,
                     oauth_started: None,
-                    config: None,
+                    config: saved_config,
+                    lan_config_only,
                     msg: Err(e),
                     refresh_status: true,
                     refresh_history: true,
@@ -411,12 +445,27 @@ impl SaveSyncApp {
     }
 
     fn lan_action(&mut self, action: savesync_core::lan::LanAction) {
-        self.start_job("LAN…", Method::Lan { action }, |_| {
-            (
-                "Состояние LAN обновлено; для сопряжения сравните SAS на обоих устройствах".into(),
+        let Some(mut config) = self.cfg.clone() else {
+            self.set_notice(
+                "Настройки ещё не загружены; дождитесь подключения к демону".into(),
                 true,
-                false,
-            )
+            );
+            return;
+        };
+        if let Err(error) = self.form.apply_lan_to(&mut config) {
+            self.set_notice(error, true);
+            return;
+        }
+        let changed = self.cfg.as_ref().unwrap().backends.lan != config.backends.lan;
+        let discover = matches!(&action, savesync_core::lan::LanAction::Discover);
+        self.start_job_with_lan_config("LAN…", Method::Lan { action }, changed.then_some(config), move |payload| {
+            let message = match payload {
+                ResponsePayload::Lan(status) if discover && status.discovered.is_empty() =>
+                    "Устройства не найдены. Включите LAN на втором устройстве; проверьте общую сеть или введите IPv4:порт вручную.".into(),
+                ResponsePayload::Lan(status) if discover => format!("Найдено адресов устройств: {}", status.discovered.len()),
+                _ => "Состояние LAN обновлено; для сопряжения сравните SAS на обоих устройствах".into(),
+            };
+            (message, true, false)
         });
     }
     fn sync_all(&mut self) {
@@ -524,8 +573,8 @@ impl eframe::App for SaveSyncApp {
             if let Some(history) = done.history {
                 self.accept_history(history);
             }
-            let lan_only = done.lan.is_some();
-            if lan_only && done.config.is_none() && done.msg.is_err() {
+            let lan_only = done.lan_config_only;
+            if done.lan.is_some() && done.config.is_none() && done.msg.is_err() {
                 self.cfg = None;
                 self.form_loaded = false;
             }
