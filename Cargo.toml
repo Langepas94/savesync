@@ -5,12 +5,13 @@ members = [
     "crates/daemon",
     "crates/app",
     "crates/decky-bridge",
+    "crates/manifest-gen",
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.89"
 repository = "https://github.com/Langepas94/savesync"
 
 [workspace.dependencies]
@@ -20,3 +21,6 @@ serde_yaml = "0.9"
 thiserror = "2"
 blake3 = "1"
 glob = "0.3"
+zip = { version = "9", default-features = false, features = ["deflate"] }
+interprocess = "2"
+ureq = { version = "2", default-features = false, features = ["json", "tls"] }

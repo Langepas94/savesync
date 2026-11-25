@@ -1,4 +1,5 @@
 /target
+/dist/
 **/*.rs.bk
 
 # Секреты — только локально / GitHub Secrets (см. HANDOFF §2)
@@ -18,3 +19,12 @@ Thumbs.db
 
 # Локальные бэкапы/артефакты при ручных прогонах
 *.ssbak
+
+# Generated Decky frontend files
+/decky-plugin/node_modules/
+/decky-plugin/dist/
+**/__pycache__/
+
+# Local OAuth application configuration
+oauth-apps.json
+.env

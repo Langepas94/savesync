@@ -8,3 +8,12 @@ repository.workspace = true
 
 [dependencies]
 savesync-core = { path = "../core" }
+eframe = "0.29"
+webbrowser = "1.2.7"
+
+url = "2.5.9"
+fs2 = "0.4.3"
+
+[target."cfg(windows)".dependencies]
+tray-icon = "0.21.3"
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }

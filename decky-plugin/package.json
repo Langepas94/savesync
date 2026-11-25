@@ -1,0 +1,28 @@
+{
+  "name": "savesync-decky",
+  "version": "1.0.0",
+  "description": "SaveSync Decky plugin: sync status and manual trigger in Quick Access",
+  "license": "GPL-3.0-or-later",
+  "private": true,
+  "scripts": {
+    "build": "tsc --noEmit && rollup -c",
+    "watch": "rollup -c -w"
+  },
+  "dependencies": {
+    "@decky/api": "^1.0.0",
+    "@decky/ui": "^4.0.0"
+  },
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^29.0.3",
+    "@rollup/plugin-json": "^6.1.0",
+    "@rollup/plugin-node-resolve": "^15.2.3",
+    "@rollup/plugin-replace": "^5.0.5",
+    "@rollup/plugin-typescript": "^11.1.6",
+    "@types/react": "^18.3.32",
+    "@types/react-dom": "^18.3.7",
+    "rollup": "^4.22.4",
+    "tslib": "^2.9.1",
+    "typescript": "^5.6.2"
+  },
+  "type": "module"
+}

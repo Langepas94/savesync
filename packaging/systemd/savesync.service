@@ -1,0 +1,15 @@
+[Unit]
+Description=SaveSync daemon (game save synchronization)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/savesync-daemon serve
+ExecStop=%h/.local/bin/savesync-daemon stop
+TimeoutStopSec=infinity
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

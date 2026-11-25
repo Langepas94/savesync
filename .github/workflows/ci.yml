@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main, develop]
+    tags: ['v*']
   pull_request:
     branches: [main, develop]
   workflow_dispatch:
@@ -34,7 +35,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      # GUI-зависимости eframe/winit на Linux.
+      - name: install linux gui deps
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev libdbus-1-dev pkg-config
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main' }}
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
   test:
@@ -47,32 +54,145 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: install linux gui deps
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev libdbus-1-dev pkg-config
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main' }}
       # Матрица кейсов путей Win/Linux обязана прогоняться на обеих ОС.
       - run: cargo test --workspace
+      - run: cargo build -p savesync-daemon
+      - run: python scripts/smoke.py
+      - name: SteamOS installer regression
+        if: runner.os == 'Linux'
+        run: python scripts/test_steamos_install.py
 
-  release:
-    name: release artifacts
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [fmt, clippy, test]
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
+  decky-plugin:
+    name: decky-plugin (python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: decky-plugin/package-lock.json
+      - run: npm ci
+        working-directory: decky-plugin
+      - run: npm run build
+        working-directory: decky-plugin
+      # JSON-RPC прокси: тесты требуют AF_UNIX → только Linux (целевая ОС).
+      - run: python -m unittest discover -s tests -v
+        working-directory: decky-plugin
+      # Структурная проверка манифеста плагина.
+      - run: python -c "import json; m=json.load(open('decky-plugin/plugin.json')); assert m['name'] and 'publish' in m"
+
+  windows-installer:
+    name: windows installer
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release --workspace --target ${{ matrix.target }}
-      - name: upload artifacts
-        uses: actions/upload-artifact@v4
         with:
-          name: savesync-${{ matrix.target }}
-          path: target/${{ matrix.target }}/release/savesync-*
+          save-if: ${{ github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main' }}
+      - run: cargo build -p savesync-daemon -p savesync-app
+      - name: ensure Inno Setup compiler
+        shell: pwsh
+        run: ./packaging/windows/ensure-compiler.ps1
+      - name: compile development installer
+        shell: pwsh
+        run: ./packaging/windows/build.ps1 -SourceDir target/debug
+      - name: isolated silent install upgrade uninstall
+        shell: pwsh
+        run: ./packaging/windows/smoke.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: savesync-development-installer
+          path: dist/savesync-setup-dev.exe*
+
+  steamos-package:
+    name: SteamOS package (Rust 1.89, glibc 2.35)
+    runs-on: ubuntu-latest
+    container: ubuntu:22.04
+    steps:
+      - name: build dependencies in compatibility container
+        run: apt-get update && apt-get install -y ca-certificates curl git build-essential pkg-config python3 libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev libdbus-1-dev
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.89.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: steamos-glibc235-rust189
+          save-if: ${{ github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main' }}
+      - run: cargo build --release --locked --workspace
+      - run: npm ci --prefix decky-plugin
+      - run: npm run build --prefix decky-plugin
+      - run: bash packaging/package-steamos.sh target/release dist
+      - run: python3 scripts/check_steamos_package.py dist/savesync-steamos.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: savesync-x86_64-unknown-linux-gnu
+          path: dist/savesync-steamos.tar.gz*
+
+  release:
+    name: signed Windows release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [fmt, clippy, test, decky-plugin, windows-installer, steamos-package]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main' }}
+      - name: validate release version
+        shell: python
+        run: |
+          import os, re
+          version = re.search(r'^version = "([^"]+)"', open("Cargo.toml").read(), re.MULTILINE).group(1)
+          assert os.environ["GITHUB_REF_NAME"] == "v" + version, "tag must match workspace version"
+      - name: ensure release installer compiler
+        shell: pwsh
+        run: ./packaging/windows/ensure-compiler.ps1
+      - name: import Windows signing identity
+        shell: pwsh
+        env:
+          SAVESYNC_SIGNING_PFX_BASE64: ${{ secrets.SAVESYNC_SIGNING_PFX_BASE64 }}
+          SAVESYNC_SIGNING_PFX_PASSWORD: ${{ secrets.SAVESYNC_SIGNING_PFX_PASSWORD }}
+        run: ./packaging/windows/prepare-signing.ps1
+      - run: cargo build --release --locked --workspace
+      - name: build signed Windows package
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          ./packaging/windows/build.ps1 -SourceDir target/release -Version $version -Signed
+      - uses: actions/upload-artifact@v4
+        with:
+          name: savesync-x86_64-pc-windows-msvc
+          path: dist/savesync-setup.exe*
+
+  publish-draft:
+    name: signed release draft
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [release, steamos-package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: savesync-x86_64-*
+          path: artifacts
+          merge-multiple: true
+      - name: create reviewable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --draft --title "SaveSync $GITHUB_REF_NAME" --generate-notes artifacts/*

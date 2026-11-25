@@ -22,7 +22,7 @@
 
 use std::path::Path;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::paths::Platform;
 
@@ -30,7 +30,7 @@ use crate::paths::Platform;
 pub const SCHEMA_VERSION: u32 = 1;
 
 /// Один файл манифеста = одна игра.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Manifest {
     /// Версия схемы; сейчас принимается только `1`.
     pub schema: u32,
@@ -38,34 +38,43 @@ pub struct Manifest {
     pub name: String,
     /// Каноничный slug = `game_key`; обязан совпадать с именем файла.
     pub slug: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub aliases: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Ids::is_empty")]
     pub ids: Ids,
     #[serde(default)]
     pub paths: Vec<PathRule>,
     /// Пути реестра (Windows / Proton-префикс). Экспорт веток `*.reg` —
     /// отдельная задача (см. research); поле парсится, но не синкается.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub registry: Vec<PathRule>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Portability::is_default")]
     pub portability: Portability,
 }
 
 /// Магазинные идентификаторы (для матчинга со сканером appinfo и подсказок UI).
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Ids {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub steam: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub gog: Vec<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub epic: Vec<String>,
 }
 
+impl Ids {
+    pub fn is_empty(&self) -> bool {
+        self.steam.is_empty() && self.gog.is_empty() && self.epic.is_empty()
+    }
+}
+
 /// Один путь сейвов из манифеста.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PathRule {
+    /// Stable logical location shared by equivalent Windows/Linux rules.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub location: Option<String>,
     /// Паттерн с плейсхолдером (`<winAppData>/...`, `<steamCompat>/...`),
     /// glob-символы `*`, `**`, `?` допустимы.
     pub pattern: String,
@@ -77,7 +86,7 @@ pub struct PathRule {
     pub tags: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Os {
     Windows,
@@ -101,15 +110,21 @@ impl Os {
 
 /// Переносимость сейвов между устройствами (свой варн/блок-лист,
 /// см. research: FromSoftware SteamID64, GameMaker secure_save).
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Portability {
     #[serde(default)]
     pub status: PortabilityStatus,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+impl Portability {
+    pub fn is_default(&self) -> bool {
+        self.status == PortabilityStatus::Ok && self.reason.is_none()
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PortabilityStatus {
     /// Переносится без оговорок.
@@ -127,13 +142,46 @@ impl Manifest {
         self.paths.iter().filter(move |p| p.os.matches(platform))
     }
 
+    /// Custom-правило пользователя (schema §3): slug получает префикс
+    /// `custom:` и никогда не публикуется в репозитории манифестов.
+    pub fn custom(name: &str, paths: Vec<PathRule>) -> Result<Manifest, String> {
+        let m = Manifest {
+            schema: SCHEMA_VERSION,
+            name: name.to_string(),
+            slug: crate::game_key::custom_key(name),
+            aliases: Vec::new(),
+            ids: Ids::default(),
+            paths,
+            registry: Vec::new(),
+            portability: Portability::default(),
+        };
+        let errors = m.validate();
+        if errors.is_empty() {
+            Ok(m)
+        } else {
+            Err(errors.join("; "))
+        }
+    }
+
+    /// Сериализация в YAML (запись custom-правил, экспорт).
+    pub fn to_yaml(&self) -> Result<String, serde_yaml::Error> {
+        serde_yaml::to_string(self)
+    }
+
     /// Валидация записи (правила schema §6): версия, slug, причина для warn/blocked.
     pub fn validate(&self) -> Vec<String> {
         let mut errors = Vec::new();
         if self.schema != SCHEMA_VERSION {
             errors.push(format!("unsupported schema {}", self.schema));
         }
-        if !crate::game_key::is_valid_slug(&self.slug) {
+        // Пользовательские игры: `custom:<slug>` (schema §3) — валиден slug
+        // после префикса. В репозитории такие записи не публикуются.
+        let slug_ok = crate::game_key::is_valid_slug(&self.slug)
+            || self
+                .slug
+                .strip_prefix("custom:")
+                .is_some_and(crate::game_key::is_valid_slug);
+        if !slug_ok {
             errors.push(format!("invalid slug {:?}", self.slug));
         }
         if self.name.trim().is_empty() {
@@ -141,6 +189,19 @@ impl Manifest {
         }
         if self.paths.is_empty() && self.registry.is_empty() {
             errors.push("no paths".into());
+        }
+        if self
+            .paths
+            .iter()
+            .chain(&self.registry)
+            .any(|p| p.pattern.trim().is_empty())
+        {
+            errors.push("empty pattern".into());
+        }
+        for rule in &self.paths {
+            if let Err(error) = glob::Pattern::new(&rule.pattern) {
+                errors.push(format!("invalid path pattern: {error}"));
+            }
         }
         if self.portability.status != PortabilityStatus::Ok && self.portability.reason.is_none() {
             errors.push("portability.warn/blocked requires reason".into());
@@ -158,6 +219,12 @@ pub struct ManifestDb {
 impl ManifestDb {
     pub fn from_entries(entries: Vec<Manifest>) -> Self {
         ManifestDb { entries }
+    }
+
+    /// Добавляет манифест, заменяя существующий с тем же slug.
+    pub fn insert(&mut self, m: Manifest) {
+        self.entries.retain(|e| e.slug != m.slug);
+        self.entries.push(m);
     }
 
     pub fn len(&self) -> usize {
@@ -201,12 +268,23 @@ fn load_dir_recursive(dir: &Path, db: &mut ManifestDb, errors: &mut Vec<std::io:
     };
     for entry in read_dir.flatten() {
         let path = entry.path();
+        if entry.file_type().is_ok_and(|kind| kind.is_symlink()) {
+            errors.push(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "symlinks are not allowed in manifest databases",
+            ));
+            continue;
+        }
         if path.is_dir() {
             load_dir_recursive(&path, db, errors);
         } else if path.extension().and_then(|e| e.to_str()) == Some("yaml") {
             match std::fs::read_to_string(&path) {
                 Ok(text) => match parse_manifest_str(&text) {
-                    Ok(m) => db.entries.push(m),
+                    Ok(m) if m.validate().is_empty() => db.entries.push(m),
+                    Ok(m) => errors.push(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        m.validate().join("; "),
+                    )),
                     Err(e) => errors.push(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
                 },
                 Err(e) => errors.push(e),
@@ -322,5 +400,43 @@ paths:
         assert!(db.get("elden-ring").is_some());
 
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn custom_manifest_roundtrip() {
+        let m = Manifest::custom(
+            "My Indie Game",
+            vec![PathRule {
+                location: None,
+                pattern: "<documents>/My Indie Game/saves".into(),
+                os: Os::Any,
+                tags: vec!["save".into()],
+            }],
+        )
+        .unwrap();
+        assert_eq!(m.slug, "custom:my-indie-game");
+        assert!(m.validate().is_empty());
+
+        // YAML round-trip: запись на диск и загрузка обратно.
+        let yaml = m.to_yaml().unwrap();
+        let parsed = parse_manifest_str(&yaml).unwrap();
+        assert_eq!(parsed.slug, m.slug);
+        assert_eq!(parsed.paths.len(), 1);
+        assert!(parsed.validate().is_empty());
+    }
+
+    #[test]
+    fn custom_manifest_rejects_empty_input() {
+        assert!(Manifest::custom("", vec![]).is_err());
+        assert!(Manifest::custom(
+            "X",
+            vec![PathRule {
+                location: None,
+                pattern: "".into(),
+                os: Os::Any,
+                tags: vec![],
+            }],
+        )
+        .is_err());
     }
 }
