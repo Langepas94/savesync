@@ -73,6 +73,19 @@ fn convert(game: &Game, installed: &HashSet<u32>) -> Option<Manifest> {
                     tags: vec!["save".into()],
                 });
             }
+        } else if let Some(tail) = path.strip_prefix("<base>/") {
+            if !tail.contains('<') && !tail.split('/').any(|part| part == "..") {
+                for os in [Os::Windows, Os::Linux] {
+                    if (os == Os::Windows && windows) || (os == Os::Linux && (linux || windows)) {
+                        paths.push(PathRule {
+                            location: None,
+                            pattern: path.clone(),
+                            os,
+                            tags: vec!["save".into()],
+                        });
+                    }
+                }
+            }
         } else if linux
             && ["<home>/", "<xdgData>/", "<xdgConfig>/"]
                 .iter()
