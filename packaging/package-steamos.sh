@@ -26,8 +26,13 @@ install -m 0644 "$repo/docs/QUICKSTART.md" "$repo/docs/USER-GUIDE.md" "$repo/doc
 install -m 0644 "$repo/docs/INSTALL-AND-TEST.md" "$package/docs/"
 sed -e 's#](OAUTH.md)#](docs/OAUTH.md)#g' -e 's#](LAN.md)#](docs/LAN.md)#g' "$repo/docs/STEAMOS-DELIVERY.md" > "$package/README.md"
 install -m 0644 "$repo/crates/core/manifests/LICENSE" "$package/licenses/manifests.txt"
+install -m 0644 "$repo/crates/core/manifests/LUDUSAVI-LICENSE" "$package/licenses/ludusavi.txt"
+install -m 0644 "$repo/crates/core/manifests/LUDUSAVI-SOURCE.md" "$package/licenses/"
 printf '%s\n' "${daemon_version##* }" > "$package/VERSION"
 tar -czf "$output/savesync-steamos.tar.gz.tmp" -C "$stage" savesync-steamos
 mv -f -- "$output/savesync-steamos.tar.gz.tmp" "$output/savesync-steamos.tar.gz"
 (cd -- "$output" && sha256sum savesync-steamos.tar.gz > savesync-steamos.tar.gz.sha256)
+cat "$repo/packaging/steamos-installer-header.sh" "$output/savesync-steamos.tar.gz" > "$output/SaveSync-SteamDeck.run"
+chmod 0755 "$output/SaveSync-SteamDeck.run"
+(cd -- "$output" && sha256sum SaveSync-SteamDeck.run > SaveSync-SteamDeck.run.sha256)
 echo "Built $output/savesync-steamos.tar.gz"

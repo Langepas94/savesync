@@ -7,6 +7,11 @@ on:
   pull_request:
     branches: [main, develop]
   workflow_dispatch:
+    inputs:
+      sign_steamos:
+        description: Sign the SteamOS update package for GitHub Releases
+        type: boolean
+        default: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -132,14 +137,33 @@ jobs:
           shared-key: steamos-glibc235-rust189
           save-if: ${{ github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main' }}
       - run: cargo build --release --locked --workspace
+        env:
+          SAVESYNC_UPDATE_PUBLIC_KEY: ${{ vars.SAVESYNC_UPDATE_PUBLIC_KEY }}
       - run: npm ci --prefix decky-plugin
       - run: npm run build --prefix decky-plugin
       - run: bash packaging/package-steamos.sh target/release dist
+      - name: Sign SteamOS update checksum
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.sign_steamos
+        shell: bash
+        env:
+          UPDATE_PRIVATE_KEY: ${{ secrets.SAVESYNC_UPDATE_PRIVATE_KEY_BASE64 }}
+          UPDATE_PUBLIC_KEY: ${{ vars.SAVESYNC_UPDATE_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$UPDATE_PRIVATE_KEY" && test -n "$UPDATE_PUBLIC_KEY"
+          keyfile="$(mktemp)"
+          trap 'rm -f "$keyfile"' EXIT
+          printf '%s' "$UPDATE_PRIVATE_KEY" | base64 -d > "$keyfile"
+          actual="$(openssl pkey -in "$keyfile" -pubout -outform DER | tail -c 32 | od -An -tx1 | tr -d ' \n')"
+          test "$actual" = "$UPDATE_PUBLIC_KEY"
+          openssl pkeyutl -sign -rawin -inkey "$keyfile" -in dist/savesync-steamos.tar.gz.sha256 -out dist/savesync-steamos.tar.gz.sha256.sig
       - run: python3 scripts/check_steamos_package.py dist/savesync-steamos.tar.gz
       - uses: actions/upload-artifact@v4
         with:
           name: savesync-x86_64-unknown-linux-gnu
-          path: dist/savesync-steamos.tar.gz*
+          path: |
+            dist/savesync-steamos.tar.gz*
+            dist/SaveSync-SteamDeck.run*
 
   release:
     name: signed Windows release

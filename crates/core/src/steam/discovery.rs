@@ -66,6 +66,12 @@ pub fn discover(
     apps.sort_by_key(|app| app.appid);
     apps.dedup_by_key(|app| app.appid);
     let installed: HashSet<u32> = apps.iter().map(|app| app.appid).collect();
+    let custom_names: HashSet<String> = db
+        .iter()
+        .filter(|m| m.slug.starts_with("custom:"))
+        .map(|m| crate::game_key::slugify(&m.name))
+        .collect();
+    crate::game_database::add_matching(db, &installed, &custom_names);
     for root in roots {
         let path = root.join("appcache/appinfo.vdf");
         if !path.is_file() {
@@ -73,10 +79,12 @@ pub fn discover(
         }
         match appinfo::load(&path) {
             Ok(entries) => {
-                for entry in entries
-                    .iter()
-                    .filter(|entry| installed.contains(&entry.appid))
-                {
+                for entry in entries.iter().filter(|entry| {
+                    installed.contains(&entry.appid)
+                        || entry.name().is_some_and(|name| {
+                            custom_names.contains(&crate::game_key::slugify(name))
+                        })
+                }) {
                     let Some(mut generated) = super::ufs::manifest_from_entry(entry) else {
                         continue;
                     };

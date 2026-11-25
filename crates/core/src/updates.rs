@@ -20,6 +20,13 @@ pub struct Release {
     pub page_url: String,
     installer: Asset,
     checksum: Asset,
+    signature: Option<Asset>,
+}
+
+pub enum ReleaseCheck {
+    NoPublishedRelease,
+    UpToDate,
+    Available(Release),
 }
 #[derive(Deserialize)]
 struct Metadata {
@@ -30,31 +37,27 @@ struct Metadata {
     assets: Vec<Asset>,
 }
 struct Client {
+    api_base: String,
     agent: ureq::Agent,
-    token: Option<String>,
 }
 impl Client {
     fn new() -> Self {
         Self {
+            api_base: API.into(),
             agent: ureq::AgentBuilder::new()
                 .timeout(std::time::Duration::from_secs(90))
                 .redirects(0)
                 .build(),
-            token: std::env::var("SAVESYNC_GITHUB_TOKEN").ok(),
         }
     }
     fn api(&self, path: &str, accept: &str) -> ureq::Request {
-        let mut request = self
-            .agent
-            .get(&format!("{API}{path}"))
+        self.agent
+            .get(&format!("{}{path}", self.api_base))
             .set("User-Agent", "SaveSync")
             .set("Accept", accept)
-            .set("X-GitHub-Api-Version", "2022-11-28");
-        if let Some(token) = &self.token {
-            request = request.set("Authorization", &format!("Bearer {token}"));
-        }
-        request
+            .set("X-GitHub-Api-Version", "2022-11-28")
     }
+
     fn asset(&self, id: u64) -> io::Result<ureq::Response> {
         let response = self
             .api(
@@ -80,7 +83,7 @@ impl Client {
             {
                 return Err(io::Error::other("unexpected release download origin"));
             }
-            // The API token is never forwarded to the signed asset URL.
+            // Download only from trusted release asset hosts.
             return self.agent.get(location).call().map_err(network_error);
         }
         Ok(response)
@@ -88,13 +91,13 @@ impl Client {
 }
 fn network_error(error: ureq::Error) -> io::Error {
     match error {
-        ureq::Error::Status(code, _) => io::Error::other(format!(
-            "release service HTTP {code}; private repositories require SAVESYNC_GITHUB_TOKEN"
-        )),
-        _ => io::Error::other("release service unavailable"),
+        ureq::Error::Status(code, _) => {
+            io::Error::other(format!("GitHub Releases вернул HTTP {code}"))
+        }
+        _ => io::Error::other("GitHub Releases недоступен"),
     }
 }
-fn select(bytes: &[u8], current: &str) -> io::Result<Option<Release>> {
+fn select_for(bytes: &[u8], current: &str, package: &str) -> io::Result<Option<Release>> {
     let metadata: Metadata = serde_json::from_slice(bytes).map_err(io::Error::other)?;
     if metadata.draft || metadata.prerelease {
         return Ok(None);
@@ -111,25 +114,30 @@ fn select(bytes: &[u8], current: &str) -> io::Result<Option<Release>> {
     {
         return Ok(None);
     }
-    let mut installers = metadata
-        .assets
-        .iter()
-        .filter(|asset| asset.name == INSTALLER);
-    let installer = installers
-        .next()
-        .cloned()
-        .ok_or_else(|| io::Error::other("signed Windows installer missing"))?;
+    let mut installers = metadata.assets.iter().filter(|asset| asset.name == package);
+    let Some(installer) = installers.next().cloned() else {
+        return Ok(None);
+    };
     if installers.next().is_some() || installer.size == 0 || installer.size > MAX_INSTALLER {
         return Err(io::Error::other("invalid installer assets"));
     }
     let checksums = metadata
         .assets
         .iter()
-        .filter(|asset| asset.name == format!("{INSTALLER}.sha256"))
+        .filter(|asset| asset.name == format!("{package}.sha256"))
         .cloned()
         .collect::<Vec<_>>();
     if checksums.len() != 1 || checksums[0].size > 4096 {
         return Err(io::Error::other("release checksum missing or ambiguous"));
+    }
+    let signatures: Vec<_> = metadata
+        .assets
+        .iter()
+        .filter(|asset| asset.name == format!("{package}.sha256.sig"))
+        .cloned()
+        .collect();
+    if package != INSTALLER && (signatures.len() != 1 || signatures[0].size != 64) {
+        return Err(io::Error::other("release signature missing or ambiguous"));
     }
     let url = url::Url::parse(&metadata.html_url).map_err(io::Error::other)?;
     if url.scheme() != "https"
@@ -143,13 +151,41 @@ fn select(bytes: &[u8], current: &str) -> io::Result<Option<Release>> {
         page_url: metadata.html_url,
         installer,
         checksum: checksums[0].clone(),
+        signature: signatures.into_iter().next(),
     }))
 }
-pub fn check() -> io::Result<Option<Release>> {
-    let response = Client::new()
-        .api("/releases/latest", "application/vnd.github+json")
-        .call()
-        .map_err(network_error)?;
+fn select(bytes: &[u8], current: &str) -> io::Result<Option<Release>> {
+    select_for(
+        bytes,
+        current,
+        if cfg!(windows) {
+            INSTALLER
+        } else {
+            "savesync-steamos.tar.gz"
+        },
+    )
+}
+pub fn check() -> io::Result<ReleaseCheck> {
+    check_with(&Client::new())
+}
+
+fn check_with(client: &Client) -> io::Result<ReleaseCheck> {
+    let accept = "application/vnd.github+json";
+    let response = match client.api("/releases/latest", accept).call() {
+        Ok(response) => response,
+        Err(ureq::Error::Status(404, _)) => {
+            // GitHub uses 404 for both a hidden repository and a missing stable release.
+            return match client.api("", accept).call() {
+                Ok(_) => Ok(ReleaseCheck::NoPublishedRelease),
+                Err(ureq::Error::Status(404, _)) => Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "Репозиторий обновлений недоступен.",
+                )),
+                Err(error) => Err(network_error(error)),
+            };
+        }
+        Err(error) => return Err(network_error(error)),
+    };
     let mut bytes = Vec::new();
     response
         .into_reader()
@@ -158,25 +194,52 @@ pub fn check() -> io::Result<Option<Release>> {
     if bytes.len() > 1024 * 1024 {
         return Err(io::Error::other("release metadata too large"));
     }
-    select(&bytes, env!("CARGO_PKG_VERSION"))
+    Ok(match select(&bytes, env!("CARGO_PKG_VERSION"))? {
+        Some(release) => ReleaseCheck::Available(release),
+        None => ReleaseCheck::UpToDate,
+    })
 }
 pub fn automatic_updates_configured() -> bool {
-    cfg!(windows)
+    (cfg!(windows)
         && option_env!("SAVESYNC_SIGNER_SHA256").is_some_and(|value| {
             value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
-        })
+        }))
+        || (cfg!(target_os = "linux") && update_key().is_ok())
 }
-fn checksum(bytes: &[u8]) -> io::Result<String> {
+fn checksum_for(bytes: &[u8], package: &str) -> io::Result<String> {
     let text = std::str::from_utf8(bytes).map_err(io::Error::other)?;
     let fields = text.split_whitespace().collect::<Vec<_>>();
     if fields.len() != 2
-        || fields[1] != INSTALLER
+        || fields[1] != package
         || fields[0].len() != 64
         || !fields[0].bytes().all(|byte| byte.is_ascii_hexdigit())
     {
         return Err(io::Error::other("invalid installer checksum file"));
     }
     Ok(fields[0].to_ascii_lowercase())
+}
+#[cfg(test)]
+fn checksum(bytes: &[u8]) -> io::Result<String> {
+    checksum_for(bytes, INSTALLER)
+}
+fn update_key() -> io::Result<ed25519_dalek::VerifyingKey> {
+    let hex = option_env!("SAVESYNC_UPDATE_PUBLIC_KEY").unwrap_or("");
+    if hex.len() != 64 || !hex.is_ascii() {
+        return Err(io::Error::other("update public key not configured"));
+    }
+    let mut key = [0u8; 32];
+    for (i, byte) in key.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).map_err(io::Error::other)?;
+    }
+    ed25519_dalek::VerifyingKey::from_bytes(&key).map_err(io::Error::other)
+}
+fn verify_checksum_signature(
+    key: &ed25519_dalek::VerifyingKey,
+    bytes: &[u8],
+    signature: &[u8],
+) -> io::Result<()> {
+    let sig = ed25519_dalek::Signature::from_slice(signature).map_err(io::Error::other)?;
+    key.verify_strict(bytes, &sig).map_err(io::Error::other)
 }
 fn download(release: &Release, directory: &Path) -> io::Result<PathBuf> {
     let client = Client::new();
@@ -186,9 +249,18 @@ fn download(release: &Release, directory: &Path) -> io::Result<PathBuf> {
         .into_reader()
         .take(4097)
         .read_to_end(&mut checksum_bytes)?;
-    let expected = checksum(&checksum_bytes)?;
+    if let Some(signature) = &release.signature {
+        let mut bytes = Vec::new();
+        client
+            .asset(signature.id)?
+            .into_reader()
+            .take(65)
+            .read_to_end(&mut bytes)?;
+        verify_checksum_signature(&update_key()?, &checksum_bytes, &bytes)?;
+    }
+    let expected = checksum_for(&checksum_bytes, &release.installer.name)?;
     std::fs::create_dir_all(directory)?;
-    let path = directory.join(INSTALLER);
+    let path = directory.join(&release.installer.name);
     let mut file = std::fs::OpenOptions::new()
         .create_new(true)
         .write(true)
@@ -230,7 +302,7 @@ fn download(release: &Release, directory: &Path) -> io::Result<PathBuf> {
 pub fn install(release: &Release) -> io::Result<()> {
     if !automatic_updates_configured() {
         return Err(io::Error::other(
-            "this build has no trusted Windows update signer; install a signed release",
+            "this build has no trusted update signing key; install the release manually",
         ));
     }
     let directory = crate::config::data_dir(crate::paths::Platform::current())
@@ -242,11 +314,58 @@ pub fn install(release: &Release) -> io::Result<()> {
             blake3::hash(oauth2::CsrfToken::new_random().secret().as_bytes()).to_hex()
         ));
     let installer = download(release, &directory)?;
-    verify_installer(&installer, &release.version)?;
-    let mut command = std::process::Command::new(&installer);
-    command.args(["/SILENT", "/NORESTART", "/STARTAFTERINSTALL=1"]);
-    command.spawn()?;
+    launch_update(&installer, &release.version)?;
     Ok(())
+}
+#[cfg(windows)]
+fn launch_update(installer: &Path, version: &semver::Version) -> io::Result<()> {
+    verify_installer(installer, version)?;
+    std::process::Command::new(installer)
+        .args(["/SILENT", "/NORESTART", "/STARTAFTERINSTALL=1"])
+        .spawn()?;
+    Ok(())
+}
+#[cfg(target_os = "linux")]
+fn launch_update(package: &Path, version: &semver::Version) -> io::Result<()> {
+    let directory = package
+        .parent()
+        .ok_or_else(|| io::Error::other("update directory missing"))?;
+    let status = std::process::Command::new("tar")
+        .args(["-xzf"])
+        .arg(package)
+        .arg("-C")
+        .arg(directory)
+        .status()?;
+    if !status.success() {
+        return Err(io::Error::other("update package extraction failed"));
+    }
+    let root = directory.join("savesync-steamos");
+    if std::fs::read_to_string(root.join("VERSION"))?.trim() != version.to_string() {
+        return Err(io::Error::other("update version mismatch"));
+    }
+    let script = root.join("install-steamos.sh");
+    let installed_app = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .ok_or_else(|| io::Error::other("home directory unavailable"))?
+        .join(".local/bin/savesync-app");
+    if std::env::current_exe()?.canonicalize()? != installed_app.canonicalize()? {
+        return Err(io::Error::other(
+            "automatic update requires the user-installed SaveSync app",
+        ));
+    }
+    std::process::Command::new("bash")
+        .args(["-c", "bash \"$1\"; exec \"$2\"", "savesync-update"])
+        .arg(&script)
+        .arg(installed_app)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()?;
+    Ok(())
+}
+#[cfg(not(any(windows, target_os = "linux")))]
+fn launch_update(_: &Path, _: &semver::Version) -> io::Result<()> {
+    Err(io::Error::other("unsupported update platform"))
 }
 #[cfg(windows)]
 fn verify_installer(path: &Path, version: &semver::Version) -> io::Result<()> {
@@ -287,13 +406,6 @@ fn verify_installer(path: &Path, version: &semver::Version) -> io::Result<()> {
         ));
     }
     Ok(())
-}
-#[cfg(not(windows))]
-fn verify_installer(_path: &Path, _version: &semver::Version) -> io::Result<()> {
-    Err(io::Error::new(
-        io::ErrorKind::Unsupported,
-        "automatic installer is Windows-only; use the SteamOS installer",
-    ))
 }
 #[cfg(test)]
 mod tests;

@@ -53,6 +53,7 @@ pub(crate) fn state_badge(ui: &mut egui::Ui, state: &str) {
         "ok" => ("синхронизировано", OK),
         "conflict" => ("конфликт", WARN),
         "no_versions" => ("нет версий", DIM),
+        "no_saves" => ("сохранения не найдены", DIM),
         other => (other, DIM),
     };
     ui.label(RichText::new(text).color(color));

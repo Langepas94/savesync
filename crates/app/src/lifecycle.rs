@@ -78,6 +78,9 @@ pub(crate) fn request_exit() -> io::Result<()> {
         return Ok(());
     }
     std::fs::write(&path, b"exit")?;
+    // A hidden window may stop receiving redraws until it becomes visible.
+    // Wake it so the running app can consume the exit request.
+    activate_existing();
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
     while std::time::Instant::now() < deadline {
         if let Ok(_guard) = instance() {

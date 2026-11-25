@@ -73,6 +73,19 @@ impl Runtime {
             .map(|path| savesync_core::paths::canonical_path(path))
             .filter(|path| paths.insert(path.clone()))
             .collect();
+        let custom_dir = self.state_dir.join("custom");
+        if custom_dir.is_dir() {
+            let (custom, _) = savesync_core::manifest::load_manifest_tree(&custom_dir);
+            for manifest in custom.iter() {
+                let resolved = savesync_core::installation::resolve_custom(
+                    manifest,
+                    &self.manifests,
+                    &self.roots,
+                    self.platform,
+                );
+                self.manifests.insert(resolved);
+            }
+        }
         let mut known: std::collections::HashSet<String> =
             savesync_core::steam::match_manifests(&self.manifests, &apps)
                 .into_iter()
@@ -116,6 +129,8 @@ impl Runtime {
                     .unwrap_or((0, 0));
                 let state = if heads > 1 {
                     "conflict"
+                } else if g.locations.is_empty() {
+                    "no_saves"
                 } else if versions == 0 {
                     "no_versions"
                 } else {

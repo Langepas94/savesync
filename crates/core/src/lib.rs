@@ -3,8 +3,10 @@
 //!
 //! MVP (итерация 1): только ручная синхронизация, без автотриггеров.
 
+mod game_database;
 pub mod game_key;
 pub mod hash;
+pub mod installation;
 pub mod manifest;
 pub mod manifest_store;
 pub mod paths;
