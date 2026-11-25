@@ -14,7 +14,7 @@ import {
   PanelSectionRow,
   staticClasses,
 } from "@decky/ui";
-import { useEffect, useState, VFC } from "react";
+import React, { useEffect, useState, VFC } from "react";
 
 // ── Типы ответов (зеркало crates/core/src/ipc.rs) ───────────────────
 
@@ -208,5 +208,5 @@ export default definePlugin(() => ({
   name: "SaveSync",
   titleView: <div className={staticClasses.Title}>SaveSync</div>,
   content: <Content />,
-  icon: "⇅",
+  icon: <span>⇅</span>,
 }));

@@ -13,6 +13,8 @@ use crate::paths::{resolve_pattern_multi, Platform, Roots};
 /// Найденный на диске путь сейвов одной игры.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SaveLocation {
+    /// Stable logical save-location ID from the game manifest.
+    pub location: Option<String>,
     /// Исходный паттерн из манифеста.
     pub pattern: String,
     /// Резолвнутый glob-паттерн.
@@ -53,6 +55,7 @@ pub fn scan(db: &ManifestDb, platform: Platform, roots: &Roots) -> Vec<FoundGame
                     .unwrap_or_default();
                 if !hits.is_empty() {
                     locations.push(SaveLocation {
+                        location: rule.location.clone(),
                         pattern: rule.pattern.clone(),
                         resolved,
                         hits,

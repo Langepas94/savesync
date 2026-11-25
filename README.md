@@ -5,9 +5,11 @@ Steam Deck (SteamOS). Аналог Steam Cloud, но: любые игры (не 
 версионирование, конфликты, бэкапы, каналы синхронизации — Яндекс.Диск /
 Google Drive и/или прямая LAN-синхронизация.
 
-**Статус:** M1–M6 завершены (core, демон, десктопное приложение, Decky-плагин,
-бэкапы). Ручная синхронизация — без таймеров и автодетекта игр
-(автотриггеры — итерация 2).
+**Статус:** версия в разработке, к релизу 1.0.0 пока не готова.
+Реализованы ручная синхронизация, история, конфликты, бэкапы, desktop UI
+и Decky-прокси. Защищённый LAN, полный OAuth, CAS индекса и Windows-установка
+ещё требуют реализации. См. [QA-отчёт](docs/QA-2026-11-25.md).
+Автотриггеры синхронизации относятся к итерации 2.
 
 ## Архитектура
 
@@ -36,6 +38,7 @@ cargo build --workspace
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
+python scripts/smoke.py  # реальные CLI + IPC, изолированные профили, без GUI
 ```
 
 ### Демон (M1)
@@ -48,16 +51,24 @@ savesync-daemon serve        # фоновый демон (IPC: named pipe / unix
 savesync-daemon scan         # найти игры
 savesync-daemon sync [игра]  # ручная синхронизация (всех или одной)
 savesync-daemon status       # статус демона
+savesync-daemon history <game_key>
+savesync-daemon restore <game_key> <version_id>
 ```
+
+`SAVESYNC_SOCKET` задаёт отдельное IPC-имя для изолированного профиля
+(по умолчанию `savesync-daemon`). Конфликт, блокировка и ошибка синхронизации
+возвращают ненулевой exit code. Данные профиля задаются стандартными
+`APPDATA` / `XDG_DATA_HOME`; скрипт smoke не меняет пользовательский профиль.
 
 ## Установка
 
-> Разделы наполняются по ходу M4/M5 (см. HANDOFF §4).
+> Ниже описан ручной запуск сборки. Готовый подписанный установщик и релиз
+> ещё не опубликованы.
 
 ### Windows
 
-1. Скачать архив `savesync-x86_64-pc-windows-msvc` из Releases
-   (демон + десктопное приложение). Подпись кода пока отсутствует —
+1. Собрать проект через `cargo build --release --workspace`.
+   Демон и приложение находятся в `target/release`. Подпись кода отсутствует —
    Windows SmartScreen может показать предупреждение.
 2. Автозапуск демона — добавить в `HKCU\Software\Microsoft\Windows\
    CurrentVersion\Run` команду `savesync-daemon serve`
@@ -78,7 +89,7 @@ savesync-daemon status       # статус демона
 ### Общее
 
 - Требования: Windows 10+, SteamOS 3.x.
-- Обновление: проверка Releases, in-app updater.
+- Обновление: ручная замена бинарей; in-app updater пока не реализован.
 - Удаление: остановить демон/сервис, удалить данные
   `~/.local/share/savesync` / `%APPDATA%\savesync`.
 
@@ -90,3 +101,5 @@ savesync-daemon status       # статус демона
 - [Схема savesync-manifests](docs/manifests-schema.md)
 - [Дизайн](docs/design/) — мокапы desktop-приложения и Decky-шторки
 - [CHANGELOG](CHANGELOG.md)
+- [Структура кода](docs/ARCHITECTURE.md)
+- [QA и блокеры 1.0.0](docs/QA-2026-11-25.md)

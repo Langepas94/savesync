@@ -11,9 +11,6 @@ use savesync_core::ipc::{Method, Request, Response};
 
 use crate::runtime::Runtime;
 
-/// Имя сокета демона по умолчанию.
-pub const SOCKET_NAME: &str = "savesync-daemon";
-
 fn ns_name(name: &str) -> std::io::Result<Name<'static>> {
     name.to_owned()
         .to_ns_name::<GenericNamespaced>()
@@ -135,6 +132,8 @@ mod tests {
             roots: Default::default(),
             state_dir: dir.join("state"),
             last_scan: Vec::new(),
+            lan_server: None,
+            serving: false,
         }
     }
 

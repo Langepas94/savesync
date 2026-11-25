@@ -125,6 +125,7 @@ pub fn to_path_rules(appid: u32, sf: &UfsSaveFile) -> Vec<PathRule> {
         };
         let full = join_pattern(&format!("{placeholder}/{path}"), &glob);
         rules.push(PathRule {
+            location: None,
             pattern: full,
             os,
             tags: vec!["save".into()],
@@ -133,6 +134,7 @@ pub fn to_path_rules(appid: u32, sf: &UfsSaveFile) -> Vec<PathRule> {
         if let Some(dir) = proton_dir(placeholder) {
             let proton = format!("<steamCompat>/{appid}/pfx/drive_c/users/steamuser/{dir}");
             rules.push(PathRule {
+                location: None,
                 pattern: join_pattern(&format!("{proton}/{path}"), &glob),
                 os: Os::Linux,
                 tags: vec!["save".into()],

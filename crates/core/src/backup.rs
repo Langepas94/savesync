@@ -35,7 +35,7 @@ pub fn create_backup(
     dest_dir: &Path,
 ) -> io::Result<PathBuf> {
     std::fs::create_dir_all(dest_dir)?;
-    let slug = game_key.strip_prefix("custom:").unwrap_or(game_key);
+    let slug = crate::storage_paths::game_component(game_key)?;
     let file = dest_dir.join(format!("{slug}_{}.{BACKUP_EXT}", snapshot::now_millis()));
     let tmp = file.with_extension("tmp");
     snapshot::create(game_key, device_id, locations, &tmp)?;
@@ -93,7 +93,9 @@ pub fn prune_backup_files(dir: &Path, game_key: &str, keep: usize) -> io::Result
 /// оставить `keep` свежих каталогов. Имена каталогов — timestamp,
 /// сортируются лексикографически.
 pub fn prune_dir_backups(state_dir: &Path, game_key: &str, keep: usize) -> io::Result<usize> {
-    let dir = state_dir.join("backups").join(game_key);
+    let dir = state_dir
+        .join("backups")
+        .join(crate::storage_paths::game_component(game_key)?);
     let rd = match std::fs::read_dir(&dir) {
         Ok(rd) => rd,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(0),
@@ -135,6 +137,7 @@ mod tests {
         std::fs::write(dir.join("slot1.sav"), content).unwrap();
         let resolved = dir.to_string_lossy().replace('\\', "/");
         vec![SaveLocation {
+            location: None,
             pattern: "<home>/game/saves".into(),
             resolved: resolved.clone(),
             hits: vec![PathBuf::from(resolved)],

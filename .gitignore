@@ -18,3 +18,8 @@ Thumbs.db
 
 # Локальные бэкапы/артефакты при ручных прогонах
 *.ssbak
+
+# Generated Decky frontend files
+/decky-plugin/node_modules/
+/decky-plugin/dist/
+**/__pycache__/

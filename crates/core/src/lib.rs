@@ -10,6 +10,7 @@ pub mod paths;
 pub mod scanner;
 pub mod snapshot;
 pub mod steam;
+pub mod storage_paths;
 
 pub mod backend;
 pub mod backup;

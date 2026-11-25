@@ -490,6 +490,7 @@ mod tests {
         std::fs::write(save_dir.join("slot1.sav"), "progress").unwrap();
 
         let loc = crate::scanner::SaveLocation {
+            location: None,
             pattern: "<home>/game/saves".into(),
             resolved: save_dir.to_string_lossy().replace('\\', "/"),
             hits: vec![save_dir.clone()],

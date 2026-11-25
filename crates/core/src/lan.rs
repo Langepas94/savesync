@@ -24,6 +24,8 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::backend::{Backend, FsBackend};
+mod server;
+pub use server::LanServer;
 
 /// Кадр больше 512 МБ не принимаем (снапшоты меньше).
 const MAX_FRAME: u64 = 512 * 1024 * 1024;
@@ -132,18 +134,10 @@ fn invalid(msg: impl Into<String>) -> io::Error {
 /// пиров. Блокирующий: запускать в отдельном потоке. Одно соединение =
 /// один запрос.
 pub fn serve(store_dir: PathBuf, port: u16, expected_pin_hash: String) -> io::Result<()> {
+    // Compatibility entry point; managed daemon listeners use LanServer.
     let listener = TcpListener::bind(("0.0.0.0", port))?;
-    for stream in listener.incoming() {
-        match stream {
-            Ok(s) => {
-                let dir = store_dir.clone();
-                let hash = expected_pin_hash.clone();
-                std::thread::spawn(move || {
-                    let _ = handle_conn(s, &dir, &hash);
-                });
-            }
-            Err(e) => eprintln!("lan accept: {e}"),
-        }
+    for stream in listener.incoming().flatten() {
+        let _ = handle_conn(stream, &store_dir, &expected_pin_hash);
     }
     Ok(())
 }
@@ -152,8 +146,30 @@ fn handle_conn(mut stream: TcpStream, store_dir: &PathBuf, pin_hash: &str) -> io
     stream.set_read_timeout(Some(Duration::from_secs(120)))?;
     let backend = FsBackend::new(store_dir);
 
-    let head = read_frame(&mut stream)?;
+    let mut head_len = [0u8; 4];
+    stream.read_exact(&mut head_len)?;
+    let head_len = u32::from_le_bytes(head_len) as usize;
+    if head_len > 64 * 1024 {
+        return Err(invalid("LAN header too large"));
+    }
+    let mut head = vec![0; head_len];
+    stream.read_exact(&mut head)?;
     let req: LanRequest = serde_json::from_slice(&head).map_err(|e| invalid(e.to_string()))?;
+
+    let supplied_pin = match &req {
+        LanRequest::Ping { pin_hash }
+        | LanRequest::GetIndex { pin_hash }
+        | LanRequest::PutIndex { pin_hash, .. }
+        | LanRequest::ListSnapshots { pin_hash, .. }
+        | LanRequest::GetSnapshot { pin_hash, .. }
+        | LanRequest::PutSnapshot { pin_hash, .. } => pin_hash,
+    };
+    if supplied_pin != pin_hash {
+        return write_frame(
+            &mut stream,
+            &serde_json::to_vec(&LanResponse::err("bad pin"))?,
+        );
+    }
 
     // Для put-* сначала дочитываем бинарный кадр (чтобы стороны не
     // разошлись по фреймингу), затем проверяем PIN и только потом
@@ -487,6 +503,7 @@ mod tests {
         std::fs::write(save_dir.join("slot1.sav"), "progress").unwrap();
 
         let loc = crate::scanner::SaveLocation {
+            location: None,
             pattern: "<home>/game/saves".into(),
             resolved: save_dir.to_string_lossy().replace('\\', "/"),
             hits: vec![save_dir.clone()],
