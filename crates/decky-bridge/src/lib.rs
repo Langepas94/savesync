@@ -1,6 +1,6 @@
 //! Мост Decky-плагина: типы сообщений JSON-RPC между Python-прокси
-//! Decky и savesync-daemon. Сам плагин (React + Python) — M5,
-//! дизайн-референс: docs/design/decky-panel.html.
+//! Decky и savesync-daemon. Сам плагин — `decky-plugin/` (React-шторка
+//! + Python-прокси, M5); дизайн-референс: docs/design/decky-panel.html.
 
 use serde::{Deserialize, Serialize};
 
