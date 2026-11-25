@@ -3866,7 +3866,7 @@ dependencies = [
 
 [[package]]
 name = "savesync-app"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "eframe",
  "fs2",
@@ -3879,7 +3879,7 @@ dependencies = [
 
 [[package]]
 name = "savesync-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "argon2",
  "blake3",
@@ -3916,7 +3916,7 @@ dependencies = [
 
 [[package]]
 name = "savesync-daemon"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "interprocess",
  "savesync-core",
@@ -3926,7 +3926,7 @@ dependencies = [
 
 [[package]]
 name = "savesync-decky-bridge"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "savesync-core",
  "serde",
@@ -3935,7 +3935,7 @@ dependencies = [
 
 [[package]]
 name = "savesync-manifest-gen"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "savesync-core",
  "serde_yaml",

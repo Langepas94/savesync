@@ -18,7 +18,7 @@ HKCU Run и пользовательские ярлыки. SYSTEM-служба �
 
 ```powershell
 cargo build --release --workspace
-./packaging/windows/build.ps1 -SourceDir target/release -Version 0.1.0
+./packaging/windows/build.ps1 -SourceDir target/release -Version 1.0.0
 ```
 
 Без `-Signed` получается **`savesync-setup-dev.exe`** — неподписанная dev-сборка.

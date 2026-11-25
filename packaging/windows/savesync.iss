@@ -1,5 +1,5 @@
 #ifndef AppVersion
-#define AppVersion "0.1.0"
+#define AppVersion "1.0.0"
 #endif
 #ifndef SourceDir
 #define SourceDir "..\..\target\release"
@@ -44,6 +44,7 @@ Source: "{#SourceDir}\savesync-daemon.exe"; DestDir: "{app}"; Flags: ignoreversi
 Source: "{#SourceDir}\savesync-app.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\docs\OAUTH.md"; DestDir: "{app}\docs"; Flags: ignoreversion
 Source: "..\..\docs\LAN.md"; DestDir: "{app}\docs"; Flags: ignoreversion
+Source: "..\..\crates\core\manifests\LICENSE"; DestDir: "{app}\licenses"; DestName: "manifests.txt"; Flags: ignoreversion
 [Icons]
 Name: "{group}\SaveSync"; Filename: "{app}\savesync-app.exe"
 Name: "{userdesktop}\SaveSync"; Filename: "{app}\savesync-app.exe"; Tasks: desktopicon

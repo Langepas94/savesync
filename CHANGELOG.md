@@ -5,6 +5,13 @@
 
 ## [Unreleased]
 
+## [1.0.0] — кандидат, не опубликован
+
+- Align workspace/installer versions and verify release Linux binaries against
+  a glibc 2.35 ceiling in an Ubuntu 22.04 container using Rust 1.89.
+- Include bundled manifest attribution in Windows and SteamOS packages.
+
+
 - Add Decky QAM LAN invitation, discovery, pairing and explicit SAS confirmation.
 - Authenticate both IPC endpoints by UID/Windows token SID before sending config
   or PINs; allow privileged Decky on Linux. Keep status responsive during sync.

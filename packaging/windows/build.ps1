@@ -1,6 +1,11 @@
-param([string]$SourceDir = 'target/release', [string]$OutputDir = 'dist', [string]$Version = '0.1.0', [switch]$Signed, [string]$Compiler)
+param([string]$SourceDir = 'target/release', [string]$OutputDir = 'dist', [string]$Version = '', [switch]$Signed, [string]$Compiler)
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+if (!$Version) {
+    $match = [regex]::Match((Get-Content -LiteralPath (Join-Path $repo 'Cargo.toml') -Raw), '(?m)^version = "([^"]+)"')
+    if (!$match.Success) { throw 'Workspace version missing' }
+    $Version = $match.Groups[1].Value
+}
 $source = (Resolve-Path $SourceDir).Path
 if (!(Test-Path -LiteralPath $OutputDir)) { New-Item -ItemType Directory -Path $OutputDir | Out-Null }
 $output = (Resolve-Path $OutputDir).Path
