@@ -24,7 +24,7 @@ pub(crate) fn apply_theme(ctx: &egui::Context) {
     v.faint_bg_color = PANEL;
     v.hyperlink_color = ACCENT;
     v.selection.bg_fill = Color32::from_rgb(0x24, 0x3b, 0x59);
-    v.selection.stroke = egui::Stroke::new(1.0, ACCENT);
+    v.selection.stroke = egui::Stroke::new(1.0_f32, ACCENT);
     v.widgets.inactive.weak_bg_fill = PANEL;
     v.widgets.hovered.weak_bg_fill = Color32::from_rgb(0x24, 0x3b, 0x59);
     ctx.set_visuals(v);
