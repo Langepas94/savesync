@@ -422,7 +422,7 @@ pub fn install(release: &Release) -> io::Result<()> {
             "this build has no trusted update signing key; install the release manually",
         ));
     }
-    let directory = crate::config::data_dir(crate::paths::Platform::current())
+    let directory = crate::config::data_dir(crate::platform::paths::Platform::current())
         .ok_or_else(|| io::Error::other("profile unavailable"))?
         .join("updates")
         .join(format!(
@@ -527,4 +527,5 @@ fn verify_installer(path: &Path, version: &semver::Version) -> io::Result<()> {
     Ok(())
 }
 #[cfg(test)]
+#[path = "tests/updates.rs"]
 mod tests;

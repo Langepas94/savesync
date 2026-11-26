@@ -1,0 +1,254 @@
+use super::*;
+use crate::catalog::manifest::{parse_manifest_str, Os, PathRule};
+
+#[test]
+fn steam_shortcut_links_arbitrary_display_name_to_its_prefix() {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("Downloads/arbitrary location");
+    let root = dir.path().join("steam");
+    std::fs::create_dir_all(&folder).unwrap();
+    let exe = folder.join("game.exe");
+    std::fs::write(&exe, b"binary").unwrap();
+    let saves = root.join("steamapps/compatdata/2147483768/pfx/drive_c/users/steamuser/Documents/Rockstar Games/Red Dead Redemption 2/Profiles/player");
+    std::fs::create_dir_all(&saves).unwrap();
+    std::fs::write(saves.join("slot"), b"save").unwrap();
+    let shortcut = root.join("userdata/1/config/shortcuts.vdf");
+    std::fs::create_dir_all(shortcut.parent().unwrap()).unwrap();
+    let mut data = b"\x00shortcuts\0\x000\0\x02appid\0".to_vec();
+    data.extend_from_slice(&2147483768u32.to_le_bytes());
+    data.extend_from_slice(b"\x01AppName\0Red Dead Redemption 2\0\x01Exe\0");
+    data.extend_from_slice(exe.to_string_lossy().as_bytes());
+    data.extend_from_slice(b"\0\x08\x08\x08");
+    std::fs::write(shortcut, data).unwrap();
+    let custom = Manifest::custom(
+        "Anything at all",
+        vec![PathRule {
+            location: None,
+            pattern: crate::platform::paths::literal_save_pattern(&folder),
+            os: Os::Linux,
+            tags: vec![],
+        }],
+    )
+    .unwrap();
+    let roots = Roots {
+        steam_libraries: vec![root],
+        ..Roots::default()
+    };
+    let resolved = resolve_custom(&custom, &ManifestDb::default(), &roots, Platform::Linux);
+    let found = crate::catalog::scanner::scan(
+        &ManifestDb::from_entries(vec![resolved]),
+        Platform::Linux,
+        &roots,
+    );
+    assert_eq!(
+        crate::platform::paths::canonical_path(&found[0].locations[0].hits[0]),
+        crate::platform::paths::canonical_path(&saves.join("slot"))
+    );
+    let discovered = discover_steam_shortcuts(&ManifestDb::default(), &roots, Platform::Linux);
+    assert_eq!(discovered.len(), 1);
+    assert_eq!(discovered[0].slug, "red-dead-redemption-2");
+}
+
+#[test]
+fn finds_database_saves_inside_selected_installation() {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("Downloads/game [test]");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("game.exe"), b"binary").unwrap();
+    std::fs::write(folder.join("140.sav"), b"save").unwrap();
+    let custom = Manifest::custom(
+        "140",
+        vec![PathRule {
+            location: None,
+            pattern: crate::platform::paths::literal_save_pattern(&folder),
+            os: Os::Linux,
+            tags: vec![],
+        }],
+    )
+    .unwrap();
+    let mut db = ManifestDb::default();
+    crate::catalog::game_database::add_matching(
+        &mut db,
+        &HashSet::new(),
+        &HashSet::from(["140".to_string()]),
+    );
+    let resolved = resolve_custom(&custom, &db, &Roots::default(), Platform::Linux);
+    let found = crate::catalog::scanner::scan(
+        &ManifestDb::from_entries(vec![resolved]),
+        Platform::Linux,
+        &Roots::default(),
+    );
+    assert_eq!(
+        crate::platform::paths::canonical_path(&found[0].locations[0].hits[0]),
+        crate::platform::paths::canonical_path(&folder.join("140.sav"))
+    );
+}
+
+#[test]
+fn uses_database_profile_rule_in_installation_and_multiple_linux_prefixes() {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("Downloads/portable release");
+    let root = dir.path().join("steam");
+    let card = dir.path().join("sd card");
+    let home = dir.path().join("home");
+    let paths = [
+        folder.join("portable/Profiles/player/SRDR30000"),
+        root.join("steamapps/compatdata/1174180/pfx/drive_c/users/steamuser/Documents/Rockstar Games/Red Dead Redemption 2/Profiles/player/SRDR30001"),
+        card.join("steamapps/compatdata/2147483768/pfx/drive_c/users/other/My Documents/rockstar games/Red Dead Redemption 2/Profiles/player/SRDR30002"),
+        home.join(".wine/drive_c/users/deck/Documents/Rockstar Games/Red Dead Redemption 2/Profiles/player/SRDR30003"),
+    ];
+    for path in &paths {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, b"save").unwrap();
+    }
+    std::fs::write(folder.join("game.exe"), b"binary").unwrap();
+    let custom = Manifest::custom(
+        "rdr2",
+        vec![PathRule {
+            location: None,
+            pattern: crate::platform::paths::literal_save_pattern(&folder),
+            os: Os::Linux,
+            tags: vec![],
+        }],
+    )
+    .unwrap();
+    let roots = Roots {
+        steam_libraries: vec![root, card],
+        home: Some(home),
+        ..Roots::default()
+    };
+    let resolved = resolve_custom(&custom, &ManifestDb::default(), &roots, Platform::Linux);
+    let found = crate::catalog::scanner::scan(
+        &ManifestDb::from_entries(vec![resolved]),
+        Platform::Linux,
+        &roots,
+    );
+    assert_eq!(found.len(), 1);
+    let actual: HashSet<_> = found[0]
+        .locations
+        .iter()
+        .flat_map(|location| &location.hits)
+        .map(|hit| crate::platform::paths::canonical_path(hit))
+        .collect();
+    assert_eq!(
+        actual,
+        paths
+            .iter()
+            .map(|path| crate::platform::paths::canonical_path(path))
+            .collect()
+    );
+    assert!(found[0]
+        .locations
+        .iter()
+        .any(|location| location.pattern.starts_with("<steamCompat>/1174180/")));
+    crate::storage::snapshot::create(
+        &custom.slug,
+        "deck",
+        &found[0].locations,
+        &dir.path().join("snapshot.zip"),
+    )
+    .unwrap();
+}
+
+#[test]
+fn finds_numbered_profile_saves_relocated_to_appdata_without_steam_shortcut() {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("home/Downloads/Red Dead Redemption 2");
+    let steam = dir.path().join("home/.local/share/Steam");
+    let user = steam.join("steamapps/compatdata/2300690450/pfx/drive_c/users/steamuser");
+    let cabinet = user.join("AppData/Roaming");
+    let paths = [
+        cabinet.join(".1911/Red Dead Redemption 2/profile/SRDR30000"),
+        cabinet.join("Goldberg SocialClub Emu Saves/RDR2/12345678/SRDR30001"),
+    ];
+    for path in paths.iter().cloned().chain([
+        cabinet.join(".1911/Other Game/profile/SRDR30002"),
+        cabinet.join(".1911/Red Dead Redemption 2/cache/chunk00003"),
+        cabinet.join(".1911/Red Dead Redemption 2/log20261126"),
+        cabinet.join(".1911/Red Dead Redemption 2/profile/settings.ini"),
+    ]) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, b"test").unwrap();
+    }
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("RDR2.exe"), b"binary").unwrap();
+    let custom = Manifest::custom(
+        "rdr2",
+        vec![PathRule {
+            location: None,
+            pattern: crate::platform::paths::literal_save_pattern(&folder),
+            os: Os::Linux,
+            tags: vec![],
+        }],
+    )
+    .unwrap();
+    let roots = Roots {
+        steam_libraries: vec![steam],
+        home: Some(dir.path().join("home")),
+        ..Roots::default()
+    };
+    let resolved = resolve_custom(&custom, &ManifestDb::default(), &roots, Platform::Linux);
+    let found = crate::catalog::scanner::scan(
+        &ManifestDb::from_entries(vec![resolved]),
+        Platform::Linux,
+        &roots,
+    );
+    let actual: HashSet<_> = found
+        .iter()
+        .flat_map(|game| &game.locations)
+        .flat_map(|location| &location.hits)
+        .map(|hit| crate::platform::paths::canonical_path(hit))
+        .collect();
+    assert_eq!(
+        actual,
+        paths
+            .iter()
+            .map(|path| crate::platform::paths::canonical_path(path))
+            .collect()
+    );
+}
+
+#[test]
+fn finds_saves_outside_arbitrary_installation_in_non_steam_prefix() {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("Downloads/anywhere");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("game.exe"), b"binary").unwrap();
+    let saves = dir.path().join(
+        "steam/steamapps/compatdata/888/pfx/drive_c/users/steamuser/Documents/Studio/Game/saves",
+    );
+    std::fs::create_dir_all(&saves).unwrap();
+    std::fs::write(saves.join("slot.dat"), b"save").unwrap();
+    let known = parse_manifest_str("schema: 1\nname: Example Game\nslug: example-game\npaths:\n - pattern: '<steamCompat>/123/pfx/drive_c/users/steamuser/Documents/Studio/Game/saves'\n   os: linux\n").unwrap();
+    let custom = Manifest::custom(
+        "Example Game",
+        vec![PathRule {
+            location: None,
+            pattern: crate::platform::paths::literal_save_pattern(&folder),
+            os: Os::Linux,
+            tags: vec![],
+        }],
+    )
+    .unwrap();
+    let roots = Roots {
+        steam_libraries: vec![dir.path().join("steam")],
+        ..Roots::default()
+    };
+    let resolved = resolve_custom(
+        &custom,
+        &ManifestDb::from_entries(vec![known]),
+        &roots,
+        Platform::Linux,
+    );
+    let found = crate::catalog::scanner::scan(
+        &ManifestDb::from_entries(vec![resolved]),
+        Platform::Linux,
+        &roots,
+    );
+    assert_eq!(
+        crate::platform::paths::canonical_path(&found[0].locations[0].hits[0]),
+        crate::platform::paths::canonical_path(&saves.join("slot.dat"))
+    );
+    let unknown = resolve_custom(&custom, &ManifestDb::default(), &roots, Platform::Linux);
+    assert!(unknown.paths.is_empty());
+}
