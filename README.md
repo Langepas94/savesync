@@ -33,14 +33,45 @@ Google Drive и/или прямая LAN-синхронизация.
 
 ## Архитектура
 
-Единый Rust-демон со всей логикой + тонкие UI по IPC:
+Desktop и Decky обращаются к демону по локальному JSON-RPC. Демон также поддерживает
+запуск части команд CLI в офлайн-режиме. Реализация синхронизации находится в `core`.
 
-| Крейт | Назначение |
+| Задача | Где искать |
 |---|---|
-| `crates/core` (`savesync-core`) | slug'и, манифесты, сканер, хеширование, снапшоты, индекс |
-| `crates/daemon` (`savesync-daemon`) | sync engine, бэкенды (YandexDisk / GoogleDrive / LAN), IPC-сервер |
-| `crates/app` (`savesync-app`) | десктопное приложение (Windows / SteamOS Desktop Mode), M4 |
-| `crates/decky-bridge` (`savesync-decky-bridge`) | типы JSON-RPC для Decky-плагина, M5 |
+| Экран, навигация, виджеты | [`app/src/ui`](crates/app/src/ui) |
+| Действия desktop, фоновые задачи и состояние | [`app/src/application`](crates/app/src/application) |
+| Окно, экземпляр приложения, запуск демона и трей | [`app/src/desktop`](crates/app/src/desktop) |
+| Команды CLI и формат консольного вывода | [`daemon/src/cli`](crates/daemon/src/cli) |
+| IPC-сервер и преобразование результатов в ответы | [`daemon/src/ipc`](crates/daemon/src/ipc) |
+| Сценарии демона: синхронизация, история, бэкапы, подключения | [`daemon/src/service`](crates/daemon/src/service) |
+| Движок, восстановление и индекс версий | [`core/src/sync`](crates/core/src/sync) |
+| Манифесты, сопоставление игры и сканирование | [`core/src/catalog`](crates/core/src/catalog) |
+| Steam, лаунчеры, префиксы, платформенные пути | [`core/src/platform`](crates/core/src/platform) |
+| Снапшоты, архивы бэкапов и пути данных SaveSync | [`core/src/storage`](crates/core/src/storage) |
+| Файловый backend, Yandex, Google Drive и LAN | [`core/src/backends`](crates/core/src/backends) |
+| OAuth и учётные данные | [`core/src/auth`](crates/core/src/auth) |
+| Формат сообщений JSON-RPC, клиент и проверка локального соединения | [`core/src/ipc`](crates/core/src/ipc) |
+| Проверка и установка обновлений | [`core/src/updates.rs`](crates/core/src/updates.rs) |
+| Генерация манифестов из Steam appinfo | [`manifest-gen`](crates/manifest-gen) |
+| Панель Decky, Python-прокси и его тесты | [`decky-plugin`](decky-plugin) |
+
+`core` не зависит от приложений. В desktop слой `application` работает через `DaemonClient`
+без зависимости от `egui`. В демоне CLI и IPC используют общий преобразователь команд,
+а `service` возвращает типизированные результаты операций. Объявления пакетов Cargo
+и старые публичные пути модулей `savesync_core` поддерживаются для совместимости.
+[`decky-bridge`](crates/decky-bridge) содержит Rust-типы. Рабочий Decky-плагин использует
+свой Python-прокси.
+
+Типовые цепочки:
+
+- Синхронизация. `app/ui/games.rs` вызывает действие в `app/application/games.rs`.
+  Запрос проходит через `daemon/ipc` к `daemon/service/sync.rs` и движку `core/sync/engine`.
+- Восстановление. Карточка игры в `app/ui/game_details.rs` вызывает сценарий
+  `daemon/service/history.rs`. Запись сейвов выполняет `core/sync/engine/restore.rs`.
+- LAN. Экран `app/ui/connections.rs` использует действия из `app/application/connections.rs`.
+  Демон выполняет их в `daemon/service/networking.rs` через `core/backends/lan`.
+
+Пути в цепочках указаны от `crates/` с опущенным каталогом `src/`.
 
 Идентификация игр: `game_key` = slug из собственного репозитория
 [`savesync-manifests`](docs/manifests-schema.md) + локальный парсер Steam
@@ -61,7 +92,14 @@ cargo fmt --all -- --check
 python scripts/smoke.py  # реальные CLI + IPC, изолированные профили, без GUI
 ```
 
-### Демон (M1)
+### Размещение тестов
+
+Unit-тесты лежат в `crates/<crate>/src/tests/`. Имена файлов соответствуют
+подсистемам. Модули подключают приватные тесты через `#[cfg(test)]` и `#[path]`.
+Интеграционные проверки публичного контракта лежат в `crates/<crate>/tests/`.
+`scripts/smoke.py` проверяет CLI и IPC через запущенный бинарник.
+
+### Демон
 
 Конфиг: `%APPDATA%\savesync\config.json` / `~/.local/share/savesync/config.json`
 (создаётся при первом запуске; `manifests_dir`, `backends.fs_path`).

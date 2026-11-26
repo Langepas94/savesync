@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::paths::Platform;
+use crate::platform::paths::Platform;
 
 /// Директория данных приложения на этой машине.
 /// Windows: `%APPDATA%\savesync`, Linux/SteamOS: `~/.local/share/savesync`.
@@ -128,9 +128,9 @@ impl Config {
     pub fn load_or_init(path: &Path) -> io::Result<Config> {
         if let Some(mut cfg) = Self::load(path)? {
             let legacy = cfg.backends.google.as_ref().is_some_and(|backend| {
-                !backend.token.is_empty() && !crate::credentials::is_reference(&backend.token)
+                !backend.token.is_empty() && !crate::auth::credentials::is_reference(&backend.token)
             }) || cfg.backends.yandex.as_ref().is_some_and(|backend| {
-                !backend.token.is_empty() && !crate::credentials::is_reference(&backend.token)
+                !backend.token.is_empty() && !crate::auth::credentials::is_reference(&backend.token)
             });
             let initialize_backups = cfg.backups.dir.is_none();
             if initialize_backups {
@@ -169,13 +169,13 @@ impl Config {
     }
 
     pub fn save(&self, path: &Path) -> io::Result<()> {
-        self.save_with_store(path, &crate::credentials::OsSecretStore)
+        self.save_with_store(path, &crate::auth::credentials::OsSecretStore)
     }
 
     pub fn save_with_store(
         &self,
         path: &Path,
-        store: &dyn crate::credentials::SecretStore,
+        store: &dyn crate::auth::credentials::SecretStore,
     ) -> io::Result<()> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -191,7 +191,7 @@ impl Config {
         // A stale UI must not replace a live credential with a deleted reference.
         for (provider, new_ref, old_ref) in [
             (
-                crate::oauth::Provider::Google,
+                crate::auth::oauth::Provider::Google,
                 self.backends
                     .google
                     .as_ref()
@@ -201,7 +201,7 @@ impl Config {
                     .map(|value| value.token.as_str()),
             ),
             (
-                crate::oauth::Provider::Yandex,
+                crate::auth::oauth::Provider::Yandex,
                 self.backends
                     .yandex
                     .as_ref()
@@ -212,12 +212,12 @@ impl Config {
             ),
         ] {
             if let Some(reference) = new_ref.filter(|reference| {
-                crate::credentials::is_reference(reference) && Some(*reference) != old_ref
+                crate::auth::credentials::is_reference(reference) && Some(*reference) != old_ref
             }) {
-                crate::credentials::load(store,reference,provider).map_err(|_|io::Error::new(io::ErrorKind::PermissionDenied,"credential reference is unavailable or stale; reload settings and sign in again"))?;
+                crate::auth::credentials::load(store,reference,provider).map_err(|_|io::Error::new(io::ErrorKind::PermissionDenied,"credential reference is unavailable or stale; reload settings and sign in again"))?;
             }
         }
-        let secured = crate::credentials::secure_config(self, store)?;
+        let secured = crate::auth::credentials::secure_config(self, store)?;
         let result = (|| {
             if let Some(parent) = path.parent() {
                 std::fs::create_dir_all(parent)?;
@@ -229,18 +229,18 @@ impl Config {
             )?;
             std::fs::rename(&tmp, path)
         })();
-        let new_refs = crate::credentials::references(&secured);
+        let new_refs = crate::auth::credentials::references(&secured);
         if result.is_err() {
-            let original_refs = crate::credentials::references(self);
+            let original_refs = crate::auth::credentials::references(self);
             for reference in new_refs {
                 if !original_refs.contains(&reference) {
-                    let _ = crate::credentials::delete(store, reference);
+                    let _ = crate::auth::credentials::delete(store, reference);
                 }
             }
         } else if let Some(old) = old {
-            for reference in crate::credentials::references(&old) {
+            for reference in crate::auth::credentials::references(&old) {
                 if !new_refs.contains(&reference) {
-                    let _ = crate::credentials::delete(store, reference);
+                    let _ = crate::auth::credentials::delete(store, reference);
                 }
             }
         }
@@ -269,7 +269,7 @@ pub fn hostname() -> String {
 /// Стабильный id: slug(hostname) + 8 hex от blake3(время, pid).
 /// Криптостойкость не требуется — это метка устройства, а не секрет.
 pub fn generate_device_id() -> String {
-    let host = crate::game_key::slugify(&hostname());
+    let host = crate::catalog::game_key::slugify(&hostname());
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
@@ -288,45 +288,5 @@ pub fn generate_device_id() -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn init_persists_device_id() {
-        let dir = std::env::temp_dir().join(format!("savesync-test-config-{}", std::process::id()));
-        let path = dir.join("config.json");
-
-        let cfg = Config::load_or_init(&path).unwrap();
-        assert_eq!(cfg.version, 1);
-        assert!(!cfg.device_id.is_empty());
-        assert_eq!(cfg.backups.auto_interval_hours, Some(24));
-        assert_eq!(
-            cfg.backups.dir.as_deref(),
-            Some(dir.join("backups").as_path())
-        );
-        assert!(dir.join("backups").is_dir());
-
-        // Повторная загрузка — тот же device_id (стабильность).
-        let cfg2 = Config::load_or_init(&path).unwrap();
-        assert_eq!(cfg, cfg2);
-
-        std::fs::remove_dir_all(&dir).ok();
-    }
-
-    #[test]
-    fn device_id_is_slug_prefixed() {
-        let id = generate_device_id();
-        let (host, suffix) = id.rsplit_once('-').unwrap();
-        assert_eq!(suffix.len(), 8);
-        assert!(suffix.chars().all(|c| c.is_ascii_hexdigit()));
-        assert!(crate::game_key::is_valid_slug(host) || host == "device");
-    }
-
-    #[test]
-    fn backends_are_optional_and_independent() {
-        let json =
-            r#"{"version":1,"device_id":"pc-abcd1234","device_name":"PC","manifests_dir":null}"#;
-        let cfg: Config = serde_json::from_str(json).unwrap();
-        assert!(cfg.backends.fs_path.is_none());
-    }
-}
+#[path = "tests/config.rs"]
+mod tests;
