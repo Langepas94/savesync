@@ -18,12 +18,14 @@ use savesync_core::scanner::{self, FoundGame};
 pub struct Runtime {
     pub shutdown_requested: bool,
     pub config: Config,
+    pub(crate) base_manifests: ManifestDb,
     pub manifests: ManifestDb,
     pub platform: Platform,
     pub roots: Roots,
     /// Локальное состояние движка (индекс, tmp, бэкапы).
     pub state_dir: PathBuf,
     pub last_scan: Vec<FoundGame>,
+    pub hidden_games: std::collections::BTreeMap<String, String>,
     pub lan_server: Option<savesync_core::lan::LanServer>,
     pub serving: bool,
     pub oauth_jobs:
@@ -57,26 +59,23 @@ impl Runtime {
                 manifests.insert(manifest.clone());
             }
         }
-        let custom_dir = state_dir.join("custom");
-        if custom_dir.is_dir() {
-            let (custom_db, errors) = savesync_core::manifest::load_manifest_tree(&custom_dir);
-            for e in &errors {
-                eprintln!("custom manifest load warning: {e}");
-            }
-            for m in custom_db.iter() {
-                manifests.insert(m.clone());
-            }
-        }
         let platform = Platform::current();
         let roots = Roots::detect(platform);
+        let hidden_games = match std::fs::read(state_dir.join("hidden-games.json")) {
+            Ok(bytes) => serde_json::from_slice(&bytes).map_err(io::Error::other)?,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Default::default(),
+            Err(e) => return Err(e),
+        };
         let mut runtime = Runtime {
             shutdown_requested: false,
             config,
-            manifests,
+            base_manifests: manifests,
+            manifests: ManifestDb::default(),
             platform,
             roots,
             state_dir,
             last_scan: Vec::new(),
+            hidden_games,
             lan_server: None,
             serving: false,
             oauth_jobs: Default::default(),
@@ -96,5 +95,7 @@ mod sync;
 mod tests;
 
 mod authorization;
+pub(crate) use authorization::cloud_check;
 
 mod networking;
+pub(crate) use networking::lan_presence;

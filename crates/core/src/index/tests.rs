@@ -7,6 +7,7 @@ fn v(id: &str, parent: Option<&str>, hash: &str) -> Version {
         merged_parents: Vec::new(),
         created_at: 1,
         device: "dev".into(),
+        device_name: None,
         hash: hash.into(),
     }
 }

@@ -90,7 +90,10 @@ pub(super) fn login(args: &[String]) -> i32 {
     let mut call = |method: Method| -> Result<ResponsePayload, String> {
         if let Some(runtime) = runtime.as_mut() {
             return Ok(match method {
-                Method::OAuthBegin { provider } => runtime.oauth_begin(provider),
+                Method::OAuthBegin {
+                    provider,
+                    client_id,
+                } => runtime.oauth_begin(provider, client_id.as_deref()),
                 Method::OAuthPoll { provider } => runtime.oauth_poll(provider),
                 Method::OAuthCancel { provider } => runtime.oauth_cancel(provider),
                 _ => unreachable!(),
@@ -103,7 +106,10 @@ pub(super) fn login(args: &[String]) -> i32 {
         }
         response.result.ok_or_else(|| "пустой ответ демона".into())
     };
-    match call(Method::OAuthBegin { provider }) {
+    match call(Method::OAuthBegin {
+        provider,
+        client_id: None,
+    }) {
         Ok(ResponsePayload::OAuthStart(start)) => println!(
             "Откройте URL в браузере и завершите вход (ожидание до 5 минут):\n{}",
             start.authorization_url

@@ -96,6 +96,21 @@ pub fn custom_key(name: &str) -> String {
     format!("custom:{}", slugify(name))
 }
 
+pub(crate) fn title_initials(slug: &str) -> Option<String> {
+    if !slug.contains('-') {
+        return None;
+    }
+    let mut initials = String::new();
+    for word in slug.split('-') {
+        if word.bytes().all(|byte| byte.is_ascii_digit()) {
+            initials.push_str(word);
+        } else if let Some(initial) = word.chars().next() {
+            initials.push(initial);
+        }
+    }
+    (initials.len() >= 3).then_some(initials)
+}
+
 /// Обратная совместимость с ранним кодом: `normalize` = `slugify`.
 pub fn normalize(name: &str) -> String {
     slugify(name)

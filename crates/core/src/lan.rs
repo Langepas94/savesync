@@ -47,8 +47,19 @@ pub fn confirm(directory: &Path, peer_id: &str) -> io::Result<()> {
 pub fn forget(directory: &Path, peer_id: &str) -> io::Result<()> {
     identity::Identity::open(directory)?.forget(peer_id)
 }
+pub fn reject(directory: &Path, peer_id: &str) -> io::Result<()> {
+    identity::Identity::open(directory)?.reject(peer_id)
+}
 pub fn pair(directory: &Path, address: &str, pin: &str) -> io::Result<PairingOffer> {
-    runtime()?.block_on(pairing::enroll(directory, address, pin))
+    pair_named(directory, address, pin, &crate::config::hostname())
+}
+pub fn pair_named(
+    directory: &Path,
+    address: &str,
+    pin: &str,
+    device_name: &str,
+) -> io::Result<PairingOffer> {
+    runtime()?.block_on(pairing::enroll(directory, address, pin, device_name))
 }
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
@@ -85,6 +96,7 @@ pub enum LanAction {
     ClosePairing,
     Pair { address: String, pin: String },
     Confirm { peer_id: String },
+    Reject { peer_id: String },
     Forget { peer_id: String },
 }
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -94,6 +106,8 @@ pub struct LanPayload {
     pub peers: Vec<PeerStatus>,
     pub discovered: Vec<DiscoveredPeer>,
     pub invitation_pin: Option<String>,
+    #[serde(default)]
+    pub invitation_addresses: Vec<String>,
     pub offer: Option<PairingOffer>,
     pub error: Option<String>,
 }

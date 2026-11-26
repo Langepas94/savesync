@@ -1,0 +1,554 @@
+---
+schema: 1
+name: 'Ancestors: The Humankind Odyssey '
+slug: ancestors-the-humankind-odyssey
+aliases:
+- 'Ancestors: The Humankind Odyssey '
+ids:
+  steam:
+  - '536270'
+paths:
+- pattern: <steamCompat>/536270/pfx/drive_c/users/steamuser/AppData/Local/Ancestors/Saved/SaveGames/*.sav
+  os: linux
+  tags:
+  - save
+- pattern: <winLocalAppData>/Ancestors/Saved/SaveGames/*.sav
+  os: windows
+  tags:
+  - save
+---
+schema: 1
+name: Don't Starve Together
+slug: don-t-starve-together
+aliases:
+- Don't Starve Together
+ids:
+  steam:
+  - '322330'
+paths:
+- pattern: <documents>/DoNotStarveTogether/*/CloudSaves/**/*
+  os: windows
+  tags:
+  - save
+- pattern: <documents>/DoNotStarveTogetherBetaBranch/*/CloudSaves/**/*
+  os: windows
+  tags:
+  - save
+- pattern: <steamCompat>/322330/pfx/drive_c/users/steamuser/Documents/DoNotStarveTogether/*/CloudSaves/**/*
+  os: linux
+  tags:
+  - save
+- pattern: <steamCompat>/322330/pfx/drive_c/users/steamuser/Documents/DoNotStarveTogetherBetaBranch/*/CloudSaves/**/*
+  os: linux
+  tags:
+  - save
+---
+schema: 1
+name: 'FlatOut: Ultimate Carnage Collector''s Edition'
+slug: flatout-ultimate-carnage-collector-s-edition
+aliases:
+- 'FlatOut: Ultimate Carnage Collector''s Edition'
+ids:
+  steam:
+  - '12360'
+paths:
+- pattern: <steamCompat>/12360/pfx/drive_c/users/steamuser/AppData/Local/FlatOut Ultimate Carnage/Savegame/*.dat
+  os: linux
+  tags:
+  - save
+- pattern: <steamCompat>/12360/pfx/drive_c/users/steamuser/AppData/Local/FlatOut Ultimate Carnage/Savegame/gfwl_id.txt
+  os: linux
+  tags:
+  - save
+- pattern: <steamCompat>/12360/pfx/drive_c/users/steamuser/AppData/Local/FlatOut Ultimate Carnage/Savegame/gfwl_username.txt
+  os: linux
+  tags:
+  - save
+- pattern: <steamCompat>/12360/pfx/drive_c/users/steamuser/AppData/Local/FlatOut Ultimate Carnage/Savegame/player_*.sav
+  os: linux
+  tags:
+  - save
+- pattern: <winLocalAppData>/FlatOut Ultimate Carnage/Savegame/*.dat
+  os: windows
+  tags:
+  - save
+- pattern: <winLocalAppData>/FlatOut Ultimate Carnage/Savegame/gfwl_id.txt
+  os: windows
+  tags:
+  - save
+- pattern: <winLocalAppData>/FlatOut Ultimate Carnage/Savegame/gfwl_username.txt
+  os: windows
+  tags:
+  - save
+- pattern: <winLocalAppData>/FlatOut Ultimate Carnage/Savegame/player_*.sav
+  os: windows
+  tags:
+  - save
+---
+schema: 1
+name: Maneater
+slug: maneater
+aliases:
+- Maneater
+ids:
+  steam:
+  - '629820'
+paths:
+- pattern: <steamCompat>/629820/pfx/drive_c/users/steamuser/AppData/Local/Maneater/Saved/SaveGames/*.sav
+  os: linux
+  tags:
+  - save
+- pattern: <winLocalAppData>/Maneater/Saved/SaveGames/*.sav
+  os: windows
+  tags:
+  - save
+---
+schema: 1
+name: Metro 2033
+slug: metro-2033
+aliases:
+- Metro 2033
+ids:
+  steam:
+  - '43110'
+paths:
+- pattern: <documents>//4A Games/Metro 2033/*.player
+  os: windows
+  tags:
+  - save
+- pattern: <documents>//4A Games/Metro 2033/auto_save
+  os: windows
+  tags:
+  - save
+- pattern: <steamCompat>/43110/pfx/drive_c/users/steamuser/Documents//4A Games/Metro 2033/*.player
+  os: linux
+  tags:
+  - save
+- pattern: <steamCompat>/43110/pfx/drive_c/users/steamuser/Documents//4A Games/Metro 2033/auto_save
+  os: linux
+  tags:
+  - save
+---
+schema: 1
+name: MudRunner
+slug: mudrunner
+aliases:
+- MudRunner
+ids:
+  steam:
+  - '675010'
+paths:
+- pattern: <steamCompat>/675010/pfx/drive_c/users/steamuser/AppData/Roaming/SpinTires MudRunner/*.stu
+  os: linux
+  tags:
+  - save
+- pattern: <steamCompat>/675010/pfx/drive_c/users/steamuser/AppData/Roaming/SpinTires MudRunner/UserSaves/*.sts
+  os: linux
+  tags:
+  - save
+- pattern: <winAppData>/SpinTires MudRunner/*.stu
+  os: windows
+  tags:
+  - save
+- pattern: <winAppData>/SpinTires MudRunner/UserSaves/*.sts
+  os: windows
+  tags:
+  - save
+---
+schema: 1
+name: No Man's Sky
+slug: no-man-s-sky
+aliases:
+- No Man's Sky
+ids:
+  steam:
+  - '275850'
+paths:
+- pattern: <steamCompat>/275850/pfx/drive_c/users/steamuser/AppData/Roaming/HelloGames/NMS/st_*/*.hg
+  os: linux
+  tags:
+  - save
+- pattern: <winAppData>/HelloGames/NMS/st_*/*.hg
+  os: windows
+  tags:
+  - save
+---
+schema: 1
+name: Scrap Mechanic
+slug: scrap-mechanic
+aliases:
+- Scrap Mechanic
+ids:
+  steam:
+  - '387990'
+paths:
+- pattern: <steamCompat>/387990/pfx/drive_c/users/steamuser/AppData/Roaming/Axolot Games/Scrap Mechanic/User/User_*/Blueprints/**/*
+  os: linux
+  tags:
+  - save
+- pattern: <steamCompat>/387990/pfx/drive_c/users/steamuser/AppData/Roaming/Axolot Games/Scrap Mechanic/User/User_*/Challenges/**/*
+  os: linux
+  tags:
+  - save
+- pattern: <steamCompat>/387990/pfx/drive_c/users/steamuser/AppData/Roaming/Axolot Games/Scrap Mechanic/User/User_*/Progress/**/*
+  os: linux
+  tags:
+  - save
+- pattern: <steamCompat>/387990/pfx/drive_c/users/steamuser/AppData/Roaming/Axolot Games/Scrap Mechanic/User/User_*/Save/*.db*
+  os: linux
+  tags:
+  - save
+- pattern: <steamCompat>/387990/pfx/drive_c/users/steamuser/AppData/Roaming/Axolot Games/Scrap Mechanic/User/User_*/Save/Backup/*.db*
+  os: linux
+  tags:
+  - save
+- pattern: <steamCompat>/387990/pfx/drive_c/users/steamuser/AppData/Roaming/Axolot Games/Scrap Mechanic/User/User_*/Save/Custom/*.db*
+  os: linux
+  tags:
+  - save
+- pattern: <steamCompat>/387990/pfx/drive_c/users/steamuser/AppData/Roaming/Axolot Games/Scrap Mechanic/User/User_*/Save/Custom/Backup/*.db*
+  os: linux
+  tags:
+  - save
+- pattern: <steamCompat>/387990/pfx/drive_c/users/steamuser/AppData/Roaming/Axolot Games/Scrap Mechanic/User/User_*/Save/Survival/*.db*
+  os: linux
+  tags:
+  - save
+- pattern: <steamCompat>/387990/pfx/drive_c/users/steamuser/AppData/Roaming/Axolot Games/Scrap Mechanic/User/User_*/Save/Survival/Backup/*.db*
+  os: linux
+  tags:
+  - save
+- pattern: <steamCompat>/387990/pfx/drive_c/users/steamuser/AppData/Roaming/Axolot Games/Scrap Mechanic/User/User_*/Tiles/**/*
+  os: linux
+  tags:
+  - save
+- pattern: <steamCompat>/387990/pfx/drive_c/users/steamuser/AppData/Roaming/Axolot Games/Scrap Mechanic/User/User_*/Worlds/**/*
+  os: linux
+  tags:
+  - save
+- pattern: <steamCompat>/387990/pfx/drive_c/users/steamuser/AppData/Roaming/Axolot Games/Scrap Mechanic/User/User_*/character
+  os: linux
+  tags:
+  - save
+- pattern: <steamCompat>/387990/pfx/drive_c/users/steamuser/AppData/Roaming/Axolot Games/Scrap Mechanic/User/User_*/keybinds.json
+  os: linux
+  tags:
+  - save
+- pattern: <steamCompat>/387990/pfx/drive_c/users/steamuser/AppData/Roaming/Axolot Games/Scrap Mechanic/User/User_*/menublueprints.json
+  os: linux
+  tags:
+  - save
+- pattern: <steamCompat>/387990/pfx/drive_c/users/steamuser/AppData/Roaming/Axolot Games/Scrap Mechanic/User/User_*/particle_editor_settings.json
+  os: linux
+  tags:
+  - save
+- pattern: <steamCompat>/387990/pfx/drive_c/users/steamuser/AppData/Roaming/Axolot Games/Scrap Mechanic/User/User_*/tile_editor_settings.json
+  os: linux
+  tags:
+  - save
+- pattern: <steamCompat>/387990/pfx/drive_c/users/steamuser/AppData/Roaming/Axolot Games/Scrap Mechanic/User/User_*/unlock
+  os: linux
+  tags:
+  - save
+- pattern: <steamCompat>/387990/pfx/drive_c/users/steamuser/AppData/Roaming/Axolot Games/Scrap Mechanic/User/User_*/watchedtutorials.json
+  os: linux
+  tags:
+  - save
+- pattern: <winAppData>/Axolot Games/Scrap Mechanic/User/User_*/Blueprints/**/*
+  os: windows
+  tags:
+  - save
+- pattern: <winAppData>/Axolot Games/Scrap Mechanic/User/User_*/Challenges/**/*
+  os: windows
+  tags:
+  - save
+- pattern: <winAppData>/Axolot Games/Scrap Mechanic/User/User_*/Progress/**/*
+  os: windows
+  tags:
+  - save
+- pattern: <winAppData>/Axolot Games/Scrap Mechanic/User/User_*/Save/*.db*
+  os: windows
+  tags:
+  - save
+- pattern: <winAppData>/Axolot Games/Scrap Mechanic/User/User_*/Save/Backup/*.db*
+  os: windows
+  tags:
+  - save
+- pattern: <winAppData>/Axolot Games/Scrap Mechanic/User/User_*/Save/Custom/*.db*
+  os: windows
+  tags:
+  - save
+- pattern: <winAppData>/Axolot Games/Scrap Mechanic/User/User_*/Save/Custom/Backup/*.db*
+  os: windows
+  tags:
+  - save
+- pattern: <winAppData>/Axolot Games/Scrap Mechanic/User/User_*/Save/Survival/*.db*
+  os: windows
+  tags:
+  - save
+- pattern: <winAppData>/Axolot Games/Scrap Mechanic/User/User_*/Save/Survival/Backup/*.db*
+  os: windows
+  tags:
+  - save
+- pattern: <winAppData>/Axolot Games/Scrap Mechanic/User/User_*/Tiles/**/*
+  os: windows
+  tags:
+  - save
+- pattern: <winAppData>/Axolot Games/Scrap Mechanic/User/User_*/Worlds/**/*
+  os: windows
+  tags:
+  - save
+- pattern: <winAppData>/Axolot Games/Scrap Mechanic/User/User_*/character
+  os: windows
+  tags:
+  - save
+- pattern: <winAppData>/Axolot Games/Scrap Mechanic/User/User_*/keybinds.json
+  os: windows
+  tags:
+  - save
+- pattern: <winAppData>/Axolot Games/Scrap Mechanic/User/User_*/menublueprints.json
+  os: windows
+  tags:
+  - save
+- pattern: <winAppData>/Axolot Games/Scrap Mechanic/User/User_*/particle_editor_settings.json
+  os: windows
+  tags:
+  - save
+- pattern: <winAppData>/Axolot Games/Scrap Mechanic/User/User_*/tile_editor_settings.json
+  os: windows
+  tags:
+  - save
+- pattern: <winAppData>/Axolot Games/Scrap Mechanic/User/User_*/unlock
+  os: windows
+  tags:
+  - save
+- pattern: <winAppData>/Axolot Games/Scrap Mechanic/User/User_*/watchedtutorials.json
+  os: windows
+  tags:
+  - save
+---
+schema: 1
+name: Surviving Mars
+slug: surviving-mars
+aliases:
+- Surviving Mars
+ids:
+  steam:
+  - '464920'
+paths:
+- pattern: <steamCompat>/464920/pfx/drive_c/users/steamuser/AppData/Roaming/Surviving Mars/*/*
+  os: linux
+  tags:
+  - save
+- pattern: <winAppData>/Surviving Mars/*/*
+  os: windows
+  tags:
+  - save
+---
+schema: 1
+name: Teardown
+slug: teardown
+aliases:
+- Teardown
+ids:
+  steam:
+  - '1167630'
+paths:
+- pattern: <steamCompat>/1167630/pfx/drive_c/users/steamuser/AppData/Local/Teardown/savegame.xml
+  os: linux
+  tags:
+  - save
+- pattern: <winLocalAppData>/Teardown/savegame.xml
+  os: windows
+  tags:
+  - save
+---
+schema: 1
+name: The Entropy Centre
+slug: the-entropy-centre
+aliases:
+- The Entropy Centre
+ids:
+  steam:
+  - '1730590'
+paths:
+- pattern: <steamCompat>/1730590/pfx/drive_c/users/steamuser/AppData/Local/Project_Kilo/Saved/SaveGames/*.sav
+  os: linux
+  tags:
+  - save
+- pattern: <winLocalAppData>/Project_Kilo/Saved/SaveGames/*.sav
+  os: windows
+  tags:
+  - save
+---
+schema: 1
+name: 'Uncrashed : FPV Drone Simulator'
+slug: uncrashed-fpv-drone-simulator
+aliases:
+- 'Uncrashed : FPV Drone Simulator'
+ids:
+  steam:
+  - '1682970'
+paths:
+- pattern: <steamCompat>/1682970/pfx/drive_c/users/steamuser/AppData/Roaming/Uncrashed/*/**/*
+  os: linux
+  tags:
+  - save
+- pattern: <winAppData>/Uncrashed/*/**/*
+  os: windows
+  tags:
+  - save
+---
+schema: 1
+name: 'Warhammer 40,000: Dawn of War II - Anniversary Edition'
+slug: warhammer-40-000-dawn-of-war-ii-anniversary-edition
+aliases:
+- 'Warhammer 40,000: Dawn of War II - Anniversary Edition'
+ids:
+  steam:
+  - '15620'
+paths:
+- pattern: <documents>/My Games/Dawn of War 2/Playback/*.rec
+  os: windows
+  tags:
+  - save
+- pattern: <documents>/My Games/Dawn of War 2/Saved Games/*.sav
+  os: windows
+  tags:
+  - save
+- pattern: <documents>/My Games/Dawn of War 2/Saved Games/*.sv
+  os: windows
+  tags:
+  - save
+- pattern: <documents>/My Games/Dawn of War 2/Screenshots/relic*.jpg
+  os: windows
+  tags:
+  - save
+- pattern: <steamCompat>/15620/pfx/drive_c/users/steamuser/Documents/My Games/Dawn of War 2/Playback/*.rec
+  os: linux
+  tags:
+  - save
+- pattern: <steamCompat>/15620/pfx/drive_c/users/steamuser/Documents/My Games/Dawn of War 2/Saved Games/*.sav
+  os: linux
+  tags:
+  - save
+- pattern: <steamCompat>/15620/pfx/drive_c/users/steamuser/Documents/My Games/Dawn of War 2/Saved Games/*.sv
+  os: linux
+  tags:
+  - save
+- pattern: <steamCompat>/15620/pfx/drive_c/users/steamuser/Documents/My Games/Dawn of War 2/Screenshots/relic*.jpg
+  os: linux
+  tags:
+  - save
+---
+schema: 1
+name: 'Warhammer 40,000: Dawn of War II - Chaos Rising'
+slug: warhammer-40-000-dawn-of-war-ii-chaos-rising
+aliases:
+- 'Warhammer 40,000: Dawn of War II - Chaos Rising'
+ids:
+  steam:
+  - '20570'
+paths:
+- pattern: <documents>/My Games/Dawn of War 2/Playback/*.rec
+  os: windows
+  tags:
+  - save
+- pattern: <documents>/My Games/Dawn of War 2/Saved Games/*.sav
+  os: windows
+  tags:
+  - save
+- pattern: <documents>/My Games/Dawn of War 2/Saved Games/*.sv
+  os: windows
+  tags:
+  - save
+- pattern: <documents>/My Games/Dawn of War 2/Screenshots/relic*.jpg
+  os: windows
+  tags:
+  - save
+- pattern: <steamCompat>/20570/pfx/drive_c/users/steamuser/Documents/My Games/Dawn of War 2/Playback/*.rec
+  os: linux
+  tags:
+  - save
+- pattern: <steamCompat>/20570/pfx/drive_c/users/steamuser/Documents/My Games/Dawn of War 2/Saved Games/*.sav
+  os: linux
+  tags:
+  - save
+- pattern: <steamCompat>/20570/pfx/drive_c/users/steamuser/Documents/My Games/Dawn of War 2/Saved Games/*.sv
+  os: linux
+  tags:
+  - save
+- pattern: <steamCompat>/20570/pfx/drive_c/users/steamuser/Documents/My Games/Dawn of War 2/Screenshots/relic*.jpg
+  os: linux
+  tags:
+  - save
+---
+schema: 1
+name: 'Warhammer 40,000: Dawn of War II - Retribution'
+slug: warhammer-40-000-dawn-of-war-ii-retribution
+aliases:
+- 'Warhammer 40,000: Dawn of War II - Retribution'
+ids:
+  steam:
+  - '56400'
+paths:
+- pattern: <documents>/My Games/Dawn of War 2/Saved Games/*.sv
+  os: windows
+  tags:
+  - save
+- pattern: <documents>/My Games/Dawn of War II - Retribution/Playback/*.rec
+  os: windows
+  tags:
+  - save
+- pattern: <documents>/My Games/Dawn of War II - Retribution/Screenshots/relic*.jpg
+  os: windows
+  tags:
+  - save
+- pattern: <steamCompat>/56400/pfx/drive_c/users/steamuser/Documents/My Games/Dawn of War 2/Saved Games/*.sv
+  os: linux
+  tags:
+  - save
+- pattern: <steamCompat>/56400/pfx/drive_c/users/steamuser/Documents/My Games/Dawn of War II - Retribution/Playback/*.rec
+  os: linux
+  tags:
+  - save
+- pattern: <steamCompat>/56400/pfx/drive_c/users/steamuser/Documents/My Games/Dawn of War II - Retribution/Screenshots/relic*.jpg
+  os: linux
+  tags:
+  - save
+---
+schema: 1
+name: 'Warhammer 40,000: Space Marine 2 - Public Test Server'
+slug: warhammer-40-000-space-marine-2-public-test-server
+aliases:
+- 'Warhammer 40,000: Space Marine 2 - Public Test Server'
+ids:
+  steam:
+  - '3417590'
+paths:
+- pattern: <steamCompat>/3417590/pfx/drive_c/users/steamuser/AppData/Local/Saber/Space Marine 2 PTS/storage/steam/user/*/**/*
+  os: linux
+  tags:
+  - save
+- pattern: <winLocalAppData>/Saber/Space Marine 2 PTS/storage/steam/user/*/**/*
+  os: windows
+  tags:
+  - save
+---
+schema: 1
+name: 'Warhammer 40,000: Space Marine 2'
+slug: warhammer-40-000-space-marine-2
+aliases:
+- 'Warhammer 40,000: Space Marine 2'
+ids:
+  steam:
+  - '2183900'
+paths:
+- pattern: <steamCompat>/2183900/pfx/drive_c/users/steamuser/AppData/Local/Saber/Space Marine 2/storage/steam/user/*/**/*
+  os: linux
+  tags:
+  - save
+- pattern: <winLocalAppData>/Saber/Space Marine 2/storage/steam/user/*/**/*
+  os: windows
+  tags:
+  - save

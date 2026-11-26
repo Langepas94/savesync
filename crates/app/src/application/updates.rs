@@ -1,9 +1,9 @@
 //! Background update checks/downloads keep IPC polling and egui responsive.
 use eframe::egui;
-use savesync_core::updates::{self, Release};
+use savesync_core::updates::{self, Release, ReleaseCheck};
 use std::sync::mpsc;
 enum Event {
-    Checked(Result<Option<Release>, String>),
+    Checked(Result<ReleaseCheck, String>),
     Installed(Result<(), String>),
 }
 #[derive(Default)]
@@ -12,14 +12,16 @@ pub(super) struct Updates {
     job: Option<mpsc::Receiver<Event>>,
     message: String,
     failed: bool,
+    last_check: Option<std::time::Instant>,
 }
 impl Updates {
     fn check(&mut self) {
+        self.last_check = Some(std::time::Instant::now());
         self.begin_check(|| updates::check().map_err(|error| error.to_string()));
     }
     fn begin_check(
         &mut self,
-        work: impl FnOnce() -> Result<Option<Release>, String> + Send + 'static,
+        work: impl FnOnce() -> Result<ReleaseCheck, String> + Send + 'static,
     ) {
         let (sender, receiver) = mpsc::channel();
         self.job = Some(receiver);
@@ -30,6 +32,13 @@ impl Updates {
         });
     }
     pub fn poll(&mut self) {
+        if self.job.is_none()
+            && self
+                .last_check
+                .is_none_or(|last| last.elapsed() >= std::time::Duration::from_secs(86400))
+        {
+            self.check();
+        }
         let event = match self.job.as_ref().map(|receiver| receiver.try_recv()) {
             Some(Ok(event)) => event,
             Some(Err(mpsc::TryRecvError::Disconnected)) => {
@@ -39,20 +48,32 @@ impl Updates {
         };
         self.job = None;
         match event {
-            Event::Checked(Ok(release)) => {
-                self.message = release
-                    .as_ref()
-                    .map(|release| format!("Доступна версия {}", release.version))
-                    .unwrap_or_else(|| "Установлена актуальная версия".into());
-                self.release = release;
+            Event::Checked(Ok(result)) => {
+                self.release = None;
+                self.message = match result {
+                    ReleaseCheck::NoPublishedRelease => {
+                        "В GitHub Releases пока нет стабильных релизов SaveSync.".into()
+                    }
+                    ReleaseCheck::UpToDate => "Установлена актуальная версия".into(),
+                    ReleaseCheck::Available(release) => {
+                        let message = format!("Доступна версия {}", release.version);
+                        self.release = Some(release);
+                        message
+                    }
+                };
                 self.failed = false;
             }
             Event::Installed(Ok(())) => {
                 self.message =
-                    "Подписанный установщик запущен; он дождётся завершения синхронизации".into();
+                    "Обновление запущено; программа дождётся завершения синхронизации".into();
                 self.failed = false;
             }
-            Event::Checked(Err(error)) | Event::Installed(Err(error)) => {
+            Event::Checked(Err(error)) => {
+                self.release = None;
+                self.message = error;
+                self.failed = true;
+            }
+            Event::Installed(Err(error)) => {
                 self.message = error;
                 self.failed = true;
             }
@@ -74,11 +95,15 @@ impl Updates {
     pub fn view(&mut self, ui: &mut egui::Ui, busy: bool) {
         ui.heading("Обновления");
         ui.label(format!("SaveSync {}", env!("CARGO_PKG_VERSION")));
+        ui.small("Автоматическая проверка при запуске и каждые 24 часа работы приложения.");
         if self.job.is_some() {
             ui.spinner();
         }
         if ui
-            .add_enabled(self.job.is_none(), egui::Button::new("Проверить Releases"))
+            .add_enabled(
+                self.job.is_none(),
+                egui::Button::new("Проверить обновления"),
+            )
             .clicked()
         {
             self.check();
@@ -94,9 +119,9 @@ impl Updates {
             );
         }
         if let Some(release) = self.release.clone() {
-            if cfg!(windows) {
+            if cfg!(any(windows, target_os = "linux")) {
                 if !updates::automatic_updates_configured() {
-                    ui.label("В этой сборке не настроен доверенный издатель обновлений. Установите подписанный релиз вручную.");
+                    ui.label("В этой сборке не настроен доверенный ключ обновлений.");
                 }
                 if ui
                     .add_enabled(
@@ -108,7 +133,7 @@ impl Updates {
                     self.install();
                 }
             } else {
-                ui.label("SteamOS: обновите пакет через install-steamos.sh в Desktop Mode; сервис будет перезапущен.");
+                ui.label("Автоматическое обновление на этой платформе недоступно.");
             }
             if ui.button("Открыть страницу релиза").clicked() {
                 let _ = webbrowser::open(&release.page_url);

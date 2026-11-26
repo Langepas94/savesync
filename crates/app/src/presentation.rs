@@ -21,14 +21,14 @@ pub(crate) fn sync_summary(p: &ResponsePayload) -> String {
     }
 }
 
-/// Форматирует unix-millis как "YYYY-MM-DD HH:MM" (UTC, без chrono).
+/// Форматирует время сохранения в UTC.
 pub(crate) fn fmt_ts(millis: u64) -> String {
     let secs = millis / 1000;
     let days = (secs / 86_400) as i64;
     let rem = secs % 86_400;
     let (y, m, d) = civil_from_days(days);
     format!(
-        "{y:04}-{m:02}-{d:02} {:02}:{:02}",
+        "{d:02}.{m:02}.{y:04}, {:02}:{:02} UTC",
         rem / 3600,
         (rem % 3600) / 60
     )
@@ -49,11 +49,16 @@ pub(crate) fn civil_from_days(z: i64) -> (i64, u32, u32) {
 }
 
 pub(crate) fn state_badge(ui: &mut egui::Ui, state: &str) {
-    let (text, color) = match state {
-        "ok" => ("синхронизировано", OK),
-        "conflict" => ("конфликт", WARN),
-        "no_versions" => ("нет версий", DIM),
-        other => (other, DIM),
-    };
+    let (text, color) = game_state(state);
     ui.label(RichText::new(text).color(color));
+}
+
+pub(crate) fn game_state(state: &str) -> (&str, eframe::egui::Color32) {
+    match state {
+        "ok" => ("Есть синхронизированные версии", OK),
+        "conflict" => ("Конфликт версий", WARN),
+        "no_versions" => ("Ещё не синхронизировано", DIM),
+        "no_saves" => ("Сохранения не найдены", DIM),
+        other => (other, DIM),
+    }
 }

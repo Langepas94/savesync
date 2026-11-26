@@ -8,9 +8,29 @@ pub(crate) fn branch(device: &str, parent: Option<&str>) -> Index {
         merged_parents: vec![],
         created_at: 1,
         device: device.into(),
+        device_name: None,
         hash: format!("hash-{device}"),
     });
     index
+}
+
+#[test]
+fn older_client_can_publish_version_without_display_name() {
+    let legacy = branch("deck", None);
+    let mut named = legacy.clone();
+    named.game_mut("game").versions[0].device_name = Some("Steam Deck".into());
+    let mut current = legacy.clone();
+    merge(&mut current, &named).unwrap();
+    merge(&mut current, &legacy).unwrap();
+    assert_eq!(
+        current.game("game").unwrap().versions[0]
+            .device_name
+            .as_deref(),
+        Some("Steam Deck")
+    );
+    let mut inconsistent = legacy;
+    inconsistent.game_mut("game").versions[0].hash = "different".into();
+    assert!(merge(&mut current, &inconsistent).is_err());
 }
 #[test]
 fn concurrent_records_keep_all_branches_and_release_owned_locks() {

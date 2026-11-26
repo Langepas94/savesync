@@ -13,6 +13,10 @@ webbrowser = "1.2.7"
 
 url = "2.5.9"
 fs2 = "0.4.3"
+rfd = "0.15"
+
+[build-dependencies]
+winresource = { version = "0.1.34", default-features = false }
 
 [target."cfg(windows)".dependencies]
 tray-icon = "0.21.3"

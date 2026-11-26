@@ -33,18 +33,30 @@ impl Runtime {
         }
         if let Some(lan) = &self.config.backends.lan {
             // Своё LAN-хранилище — канал для локального движка…
-            out.push(Engine::new(
-                Box::new(FsBackend::new(self.lan_store())) as Box<dyn Backend>,
-                self.config.device_id.clone(),
-                self.state_dir.clone(),
-            ));
+            out.push(
+                Engine::new(
+                    Box::new(FsBackend::new(self.lan_store())) as Box<dyn Backend>,
+                    self.config.device_id.clone(),
+                    self.state_dir.clone(),
+                )
+                .with_history_channel("lan"),
+            );
             // …и каждый пир — отдельный канал.
-            for peer in &lan.peers {
+            let identity = self.state_dir.join("lan-identity");
+            let mut addresses = lan.peers.clone();
+            for address in savesync_core::lan::peers(&identity)
+                .map_err(|error| error.to_string())?
+                .into_iter()
+                .filter(|entry| entry.confirmed)
+                .filter_map(|entry| entry.peer.address)
+            {
+                if !addresses.contains(&address) {
+                    addresses.push(address);
+                }
+            }
+            for peer in &addresses {
                 out.push(Engine::new(
-                    Box::new(LanBackend::with_identity(
-                        peer,
-                        self.state_dir.join("lan-identity"),
-                    )) as Box<dyn Backend>,
+                    Box::new(LanBackend::with_identity(peer, &identity)) as Box<dyn Backend>,
                     self.config.device_id.clone(),
                     self.state_dir.clone(),
                 ));
@@ -55,7 +67,17 @@ impl Runtime {
                 "канал синхронизации не настроен (backends.fs_path / yandex / google / lan)".into(),
             );
         }
-        Ok(out)
+        let fallback;
+        let name = if self.config.device_name == "device" {
+            fallback = savesync_core::config::hostname();
+            &fallback
+        } else {
+            &self.config.device_name
+        };
+        Ok(out
+            .into_iter()
+            .map(|engine| engine.with_device_name(name))
+            .collect())
     }
 
     /// Локальное хранилище LAN-канала: его обслуживает TCP-сервер

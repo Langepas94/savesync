@@ -160,6 +160,18 @@ fn handle_conn(stream: &mut TcpStream, disk: &MockDisk) {
     } else if req.target.starts_with("/v1/disk/resources") && req.method == "PUT" {
         disk.dirs.lock().unwrap().insert(path_param);
         respond(stream, "201 Created", b"{}");
+    } else if req.target.starts_with("/v1/disk/resources") && req.method == "DELETE" {
+        assert_eq!(
+            query_param(&req.target, "permanently").as_deref(),
+            Some("true")
+        );
+        assert!(path_param
+            .rsplit('/')
+            .next()
+            .unwrap()
+            .starts_with("savesync-access-check-"));
+        disk.files.lock().unwrap().remove(&path_param).unwrap();
+        respond(stream, "204 No Content", b"");
     } else if req.target.starts_with("/v1/disk/resources") && req.method == "GET" {
         let files = disk.files.lock().unwrap();
         let is_dir = disk.dirs.lock().unwrap().contains(&path_param);
@@ -187,6 +199,21 @@ fn handle_conn(stream: &mut TcpStream, disk: &MockDisk) {
     } else {
         respond(stream, "404 Not Found", b"{}");
     }
+}
+
+#[test]
+fn access_check_round_trips_in_app_folder_and_cleans_up() {
+    let (base, disk) = start_mock();
+    let mut backend = YandexDisk::with_base_url("test-token", base);
+    backend.set_root("app:/SaveSync");
+    disk.files
+        .lock()
+        .unwrap()
+        .insert("app:/SaveSync/existing".into(), b"keep".to_vec());
+    backend.verify_access().unwrap();
+    let files = disk.files.lock().unwrap();
+    assert_eq!(files.len(), 1);
+    assert_eq!(files["app:/SaveSync/existing"], b"keep");
 }
 
 #[test]

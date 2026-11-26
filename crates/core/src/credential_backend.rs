@@ -105,6 +105,9 @@ impl Backend for CredentialBackend {
     fn put_index(&self, data: &[u8]) -> io::Result<()> {
         self.execute(|backend| backend.put_index(data))
     }
+    fn verify_access(&self) -> io::Result<()> {
+        self.execute(|backend| backend.verify_access())
+    }
 }
 
 #[cfg(test)]

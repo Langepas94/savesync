@@ -13,11 +13,14 @@ pub(super) fn command(args: &[String]) -> i32 {
         Some("confirm") if args.len() == 2 => LanAction::Confirm {
             peer_id: args[1].clone(),
         },
+        Some("reject") if args.len() == 2 => LanAction::Reject {
+            peer_id: args[1].clone(),
+        },
         Some("forget") if args.len() == 2 => LanAction::Forget {
             peer_id: args[1].clone(),
         },
         _ => {
-            eprintln!("remote lan status|discover|invite|cancel|pair <host:port> <PIN>|confirm <peer_id>|forget <peer_id>");
+            eprintln!("remote lan status|discover|invite|cancel|pair <host:port> <PIN>|confirm <peer_id>|reject <peer_id>|forget <peer_id>");
             return 2;
         }
     };

@@ -30,7 +30,6 @@ pub(crate) fn cmd_serve() -> i32 {
                         if n > 0 {
                             println!("авто-бэкап: {n} игр");
                         }
-                        rt.mark_auto_backup_done();
                     }
                     Err(e) => eprintln!("авто-бэкап: {e}"),
                 }

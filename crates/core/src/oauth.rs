@@ -75,6 +75,14 @@ pub struct ClientSettings {
 }
 impl ClientSettings {
     pub fn load(profile: &Path, provider: Provider) -> io::Result<Self> {
+        Self::load_with_id(profile, provider, None)
+    }
+
+    pub fn load_with_id(
+        profile: &Path,
+        provider: Provider,
+        input: Option<&str>,
+    ) -> io::Result<Self> {
         let applications = match std::fs::read(profile.join("oauth-apps.json")) {
             Ok(bytes) => serde_json::from_slice::<Applications>(&bytes)?,
             Err(error) if error.kind() == io::ErrorKind::NotFound => Applications::default(),
@@ -86,11 +94,16 @@ impl ClientSettings {
             Provider::Yandex => applications.yandex,
         }
         .unwrap_or_default();
-        let client_id =
-            std::env::var(format!("SAVESYNC_{name}_CLIENT_ID")).unwrap_or(application.client_id);
-        if client_id.trim().is_empty() {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput,format!("Настройте {provider:?} client_id в oauth-apps.json или SAVESYNC_{name}_CLIENT_ID")));
-        }
+        let environment = std::env::var(format!("SAVESYNC_{name}_CLIENT_ID")).ok();
+        let configured = match provider {
+            Provider::Yandex => option_env!("SAVESYNC_YANDEX_PUBLIC_CLIENT_ID"),
+            Provider::Google => None,
+        };
+        let client_id = [input, environment.as_deref(), Some(&application.client_id), configured]
+            .into_iter().flatten().map(str::trim).find(|value| !value.is_empty())
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput,
+                format!("OAuth-приложение {provider:?} не настроено. Укажите Client ID в приложении, oauth-apps.json или SAVESYNC_{name}_CLIENT_ID.")))?
+            .to_owned();
         Ok(Self {
             provider,
             client_id,

@@ -1,5 +1,5 @@
 #ifndef AppVersion
-#define AppVersion "0.1.0"
+#define AppVersion "1.0.0"
 #endif
 #ifndef SourceDir
 #define SourceDir "..\..\target\release"
@@ -19,12 +19,15 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.10240
 OutputDir={#OutputDirectory}
-#ifdef Signed
+#ifdef ReleaseInstaller
 OutputBaseFilename=savesync-setup
+#else
+OutputBaseFilename=savesync-setup-dev
+#endif
+#ifdef Signed
 SignTool=savesync
 SignedUninstaller=yes
 #else
-OutputBaseFilename=savesync-setup-dev
 SignedUninstaller=no
 #endif
 Compression=lzma2
@@ -44,6 +47,15 @@ Source: "{#SourceDir}\savesync-daemon.exe"; DestDir: "{app}"; Flags: ignoreversi
 Source: "{#SourceDir}\savesync-app.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\docs\OAUTH.md"; DestDir: "{app}\docs"; Flags: ignoreversion
 Source: "..\..\docs\LAN.md"; DestDir: "{app}\docs"; Flags: ignoreversion
+Source: "..\..\docs\QUICKSTART.md"; DestDir: "{app}\docs"; Flags: ignoreversion
+Source: "..\..\docs\INSTALL-AND-TEST.md"; DestDir: "{app}\docs"; Flags: ignoreversion
+Source: "..\..\docs\USER-GUIDE.md"; DestDir: "{app}\docs"; Flags: ignoreversion
+Source: "..\..\docs\TRY-1.0.0.md"; DestDir: "{app}\docs"; Flags: ignoreversion
+Source: "..\..\docs\STEAMOS-DELIVERY.md"; DestDir: "{app}\docs"; Flags: ignoreversion
+Source: "..\..\docs\manifests-schema.md"; DestDir: "{app}\docs"; Flags: ignoreversion
+Source: "..\..\crates\core\manifests\LICENSE"; DestDir: "{app}\licenses"; DestName: "manifests.txt"; Flags: ignoreversion
+Source: "..\..\crates\core\manifests\LUDUSAVI-LICENSE"; DestDir: "{app}\licenses"; DestName: "ludusavi.txt"; Flags: ignoreversion
+Source: "..\..\crates\core\manifests\LUDUSAVI-SOURCE.md"; DestDir: "{app}\licenses"; Flags: ignoreversion
 [Icons]
 Name: "{group}\SaveSync"; Filename: "{app}\savesync-app.exe"
 Name: "{userdesktop}\SaveSync"; Filename: "{app}\savesync-app.exe"; Tasks: desktopicon

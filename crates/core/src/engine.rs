@@ -77,7 +77,9 @@ pub enum ImportOutcome {
 /// Движок синхронизации одного устройства.
 pub struct Engine<B: Backend> {
     backend: B,
+    history_channel: Option<&'static str>,
     device_id: String,
+    device_name: Option<String>,
     /// Локальное состояние: `index.json` (с `applied`), `tmp/`, `backups/`.
     state_dir: PathBuf,
     /// Сколько авто-бэкапов на игру хранить (plan §2.1, retention).
@@ -88,7 +90,9 @@ impl<B: Backend> Engine<B> {
     pub fn new(backend: B, device_id: impl Into<String>, state_dir: impl Into<PathBuf>) -> Self {
         Engine {
             backend,
+            history_channel: None,
             device_id: device_id.into(),
+            device_name: None,
             state_dir: state_dir.into(),
             backup_retention: 10,
         }
@@ -104,6 +108,17 @@ impl<B: Backend> Engine<B> {
     pub fn backend_name(&self) -> &'static str {
         self.backend.name()
     }
+
+    pub fn with_history_channel(mut self, channel: &'static str) -> Self {
+        self.history_channel = Some(channel);
+        self
+    }
+
+    pub fn with_device_name(mut self, name: &str) -> Self {
+        let name = name.trim();
+        self.device_name = (!name.is_empty()).then(|| name.chars().take(128).collect());
+        self
+    }
 }
 
 mod import;
@@ -113,6 +128,7 @@ mod state;
 #[cfg(test)]
 mod tests;
 mod upload;
+pub use state::snapshot_details;
 
 /// Recover an interrupted file restore before exposing profile state to clients.
 pub fn recover_state(state: &Path) -> io::Result<()> {

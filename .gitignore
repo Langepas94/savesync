@@ -1,4 +1,5 @@
 /target
+/dist/
 **/*.rs.bk
 
 # Секреты — только локально / GitHub Secrets (см. HANDOFF §2)

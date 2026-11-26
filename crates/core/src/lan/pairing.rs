@@ -39,6 +39,14 @@ pub(super) fn take_attempt(window: &PairingWindow) -> io::Result<(String, String
     window.attempts += 1;
     Ok((window.pin.clone(), window.generation.clone()))
 }
+pub(super) fn active_pin(window: &PairingWindow) -> Option<String> {
+    window
+        .lock()
+        .ok()?
+        .as_ref()
+        .filter(|window| window.until > std::time::Instant::now() && window.attempts < 5)
+        .map(|window| window.pin.clone())
+}
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "snake_case")]
 pub(super) enum Hello {
@@ -50,10 +58,43 @@ struct Answer {
     peer: Peer,
     spake: Vec<u8>,
     proof: Vec<u8>,
+    #[serde(default)]
+    name: Option<ProvenName>,
 }
 #[derive(Serialize, Deserialize)]
 struct Proof {
     proof: Vec<u8>,
+    #[serde(default)]
+    name: Option<ProvenName>,
+}
+// Name proofs extend the handshake without changing the transcript used by older peers.
+#[derive(Serialize, Deserialize)]
+struct ProvenName {
+    value: String,
+    proof: Vec<u8>,
+}
+impl ProvenName {
+    fn new(key: &[u8], transcript: &Transcript<'_>, value: &str, role: &str) -> io::Result<Self> {
+        let value = if value.trim().is_empty() {
+            "SaveSync"
+        } else {
+            value.trim()
+        };
+        let value: String = value.chars().take(128).collect();
+        let proof = digest(key, transcript, &format!("{role} name:{value}"))?;
+        Ok(Self { value, proof })
+    }
+
+    fn verify(self, key: &[u8], transcript: &Transcript<'_>, role: &str) -> io::Result<String> {
+        if self.value.chars().count() > 128 || self.value.trim().is_empty() {
+            return Err(denied());
+        }
+        verify(
+            &self.proof,
+            &digest(key, transcript, &format!("{role} name:{}", self.value))?,
+        )?;
+        Ok(self.value)
+    }
 }
 #[derive(Serialize)]
 struct Transcript<'a> {
@@ -85,12 +126,13 @@ fn sas(key: &[u8], transcript: &Transcript<'_>) -> io::Result<String> {
 pub(super) async fn accept(
     identity: &Identity,
     connection: &quinn::Connection,
-    send: &mut quinn::SendStream,
-    receive: &mut quinn::RecvStream,
+    streams: (&mut quinn::SendStream, &mut quinn::RecvStream),
     client: Peer,
     a: Vec<u8>,
     window: &PairingWindow,
+    device_name: &str,
 ) -> io::Result<()> {
+    let (send, receive) = streams;
     let (pin, generation) = take_attempt(window)?;
     if a.len() > 128 || client.public_key.len() != 32 || client.certificate.len() > 16384 {
         return Err(denied());
@@ -115,12 +157,19 @@ pub(super) async fn accept(
             peer: server.clone(),
             spake: b.clone(),
             proof: digest(&key, &transcript, "server")?,
+            name: Some(ProvenName::new(&key, &transcript, device_name, "server")?),
         },
     )
     .await?;
     let proof: Proof = receive_value(receive).await?;
     verify(&proof.proof, &digest(&key, &transcript, "client")?)?;
     let sas = sas(&key, &transcript)?;
+    let name = proof
+        .name
+        .map(|name| name.verify(&key, &transcript, "client"))
+        .transpose()?;
+    let mut client = client;
+    client.name = name;
     let offer = PairingOffer {
         peer_id: server.id.clone(),
         sas: sas.clone(),
@@ -140,7 +189,12 @@ pub(super) async fn accept(
 }
 // Aliases keep the stream variable names readable in the handshake.
 use super::transport::{receive as receive_value, send as send_value};
-pub(super) async fn enroll(directory: &Path, address: &str, pin: &str) -> io::Result<PairingOffer> {
+pub(super) async fn enroll(
+    directory: &Path,
+    address: &str,
+    pin: &str,
+    device_name: &str,
+) -> io::Result<PairingOffer> {
     if pin.len() != 6 || !pin.bytes().all(|b| b.is_ascii_digit()) {
         return Err(denied());
     }
@@ -179,16 +233,22 @@ pub(super) async fn enroll(directory: &Path, address: &str, pin: &str) -> io::Re
             &mut send,
             &Proof {
                 proof: digest(&key, &transcript, "client")?,
+                name: Some(ProvenName::new(&key, &transcript, device_name, "client")?),
             },
         )
         .await?;
         let offer: PairingOffer = receive_value(&mut receive).await?;
         let expected = sas(&key, &transcript)?;
+        let name = answer
+            .name
+            .map(|name| name.verify(&key, &transcript, "server"))
+            .transpose()?;
         if offer.peer_id != answer.peer.id || offer.sas != expected {
             return Err(denied());
         }
         let mut peer = answer.peer;
         peer.address = Some(address.into());
+        peer.name = name;
         identity.pending(peer, expected)?;
         send.finish().map_err(error)?;
         Ok(offer)

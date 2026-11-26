@@ -120,10 +120,14 @@ impl YandexDisk {
 
     /// Загрузка байтов по пути (перезапись).
     fn upload(&self, rel: &str, data: &[u8]) -> io::Result<()> {
+        self.upload_with_overwrite(rel, data, "true")
+    }
+
+    fn upload_with_overwrite(&self, rel: &str, data: &[u8], overwrite: &str) -> io::Result<()> {
         let link = self.get_json(
             "upload-href",
             "/resources/upload",
-            &[("path", &self.disk_path(rel)), ("overwrite", "true")],
+            &[("path", &self.disk_path(rel)), ("overwrite", overwrite)],
         )?;
         let href = link
             .get("href")
@@ -136,6 +140,32 @@ impl YandexDisk {
             .send_bytes(data)
             .map_err(|e| self.api_error("upload", e))?;
         Ok(())
+    }
+
+    pub fn verify_access(&self) -> io::Result<()> {
+        self.mkdir("")?;
+        let nonce = oauth2::CsrfToken::new_random_len(24);
+        let name = format!("savesync-access-check-{}.tmp", nonce.secret());
+        let data = b"SaveSync access check";
+        self.upload_with_overwrite(&name, data, "false")?;
+        let read = self.download(&name).and_then(|bytes| {
+            if bytes == data {
+                Ok(())
+            } else {
+                Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Проверочный файл Яндекс Диска повреждён",
+                ))
+            }
+        });
+        let cleanup = self
+            .auth(self.agent.delete(&format!("{}/resources", self.base_url)))
+            .query("path", &self.disk_path(&name))
+            .query("permanently", "true")
+            .call()
+            .map(|_| ())
+            .map_err(|error| self.api_error("delete access check", error));
+        read.and(cleanup)
     }
 
     /// Скачивание байтов по пути.
@@ -296,6 +326,10 @@ impl crate::backend::Backend for YandexDisk {
 
     fn name(&self) -> &'static str {
         "yandex-disk"
+    }
+
+    fn verify_access(&self) -> io::Result<()> {
+        YandexDisk::verify_access(self)
     }
 }
 

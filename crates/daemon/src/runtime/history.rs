@@ -12,24 +12,76 @@ impl Runtime {
                 .and_then(|b| serde_json::from_slice(&b).ok())
                 .unwrap_or_default();
 
-        let (versions, heads) = match index.game(game_key) {
+        let (mut versions, heads) = match index.game(game_key) {
             Some(g) => (
                 g.versions
                     .iter()
-                    .map(|v| VersionEntry {
-                        id: v.id.clone(),
-                        parent: v.parent.clone(),
-                        created_at: v.created_at,
-                        device: v.device.clone(),
-                        hash: v.hash.clone(),
+                    .map(|v| {
+                        let (channel, file_count) = savesync_core::engine::snapshot_details(
+                            &self.state_dir,
+                            game_key,
+                            &v.id,
+                        );
+                        VersionEntry {
+                            id: v.id.clone(),
+                            parent: v.parent.clone(),
+                            created_at: v.created_at,
+                            device: v.device.clone(),
+                            device_name: v.device_name.clone(),
+                            hash: v.hash.clone(),
+                            channel,
+                            file_count,
+                        }
                     })
                     .collect::<Vec<_>>(),
                 g.heads().iter().map(|h| h.id.clone()).collect::<Vec<_>>(),
             ),
             None => (Vec::new(), Vec::new()),
         };
+        versions.sort_unstable_by(|a, b| a.created_at.cmp(&b.created_at).then(a.id.cmp(&b.id)));
         ResponsePayload::History(HistoryPayload {
             game_key: game_key.to_string(),
+            install_paths: self
+                .manifests
+                .get(game_key)
+                .into_iter()
+                .flat_map(|manifest| {
+                    manifest.installed_at.iter().chain(
+                        manifest
+                            .ids
+                            .steam
+                            .iter()
+                            .filter_map(|id| id.parse::<u32>().ok())
+                            .filter_map(|id| self.roots.steam_installations.get(&id)),
+                    )
+                })
+                .map(|path| path.display().to_string())
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect(),
+            local_files: self
+                .last_scan
+                .iter()
+                .find(|game| game.game_key == game_key)
+                .into_iter()
+                .flat_map(|game| &game.locations)
+                .flat_map(|location| &location.hits)
+                .filter_map(|path| {
+                    let metadata = std::fs::metadata(path).ok()?;
+                    if !metadata.is_file() {
+                        return None;
+                    }
+                    Some(savesync_core::ipc::LocalSaveFile {
+                        path: path.to_string_lossy().into_owned(),
+                        size: metadata.len(),
+                        modified_at: metadata
+                            .modified()
+                            .ok()
+                            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                            .map(|time| time.as_millis().min(u64::MAX as u128) as u64),
+                    })
+                })
+                .collect(),
             versions,
             applied: applied.get(game_key).cloned(),
             heads,
@@ -94,6 +146,9 @@ impl Runtime {
             {
                 break;
             }
+        }
+        if results.iter().any(|result| result.outcome == "applied") {
+            self.refresh_catalog();
         }
         ResponsePayload::Sync(SyncPayload { results })
     }

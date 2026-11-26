@@ -27,6 +27,7 @@ impl<B: Backend> Engine<B> {
             id: id.clone(),
             created_at: stamp,
             device: format!("{}(import)", snap_manifest.device_id),
+            device_name: None,
             hash: snap_manifest.content_hash,
         };
 

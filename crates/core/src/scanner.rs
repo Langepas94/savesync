@@ -110,7 +110,13 @@ fn collect_regular_files(
     crate::paths::validate_source_path(base, path)?;
     let metadata = std::fs::symlink_metadata(path)?;
     if metadata.is_file() {
-        out.push(path.to_path_buf());
+        if !crate::backup::is_backup_archive(path)
+            && !path
+                .file_name()
+                .is_some_and(|name| name.eq_ignore_ascii_case("steam_autocloud.vdf"))
+        {
+            out.push(path.to_path_buf());
+        }
     } else if metadata.is_dir() {
         for entry in std::fs::read_dir(path)? {
             collect_regular_files(base, &entry?.path(), out)?;
@@ -194,6 +200,24 @@ mod tests {
                 .map(|y| parse_manifest_str(y).unwrap())
                 .collect(),
         )
+    }
+
+    #[test]
+    fn backup_archives_inside_a_save_folder_are_not_synced() {
+        let fx = Fixture::new("nested-backup");
+        fx.touch("saves/current.sav");
+        fx.touch("saves/archive/previous.savesync-backup");
+        let db = db_from(&[
+            "schema: 1\nname: Test Game\nslug: test-game\npaths:\n  - pattern: '<home>/saves'\n",
+        ]);
+        let roots = Roots {
+            home: Some(fx.path("")),
+            ..Roots::default()
+        };
+        let found = scan(&db, Platform::current(), &roots);
+        let hits = &found[0].locations[0].hits;
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].file_name().unwrap(), "current.sav");
     }
 
     #[test]

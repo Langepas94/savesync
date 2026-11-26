@@ -104,6 +104,10 @@ pub(crate) fn cmd_custom(args: &[String]) -> i32 {
                 return usage_custom();
             };
             let plain = slug.strip_prefix("custom:").unwrap_or(slug);
+            if !savesync_core::game_key::is_valid_slug(plain) {
+                eprintln!("невалидный slug custom-правила");
+                return 2;
+            }
             let file = custom_dir().join(format!("{plain}.yaml"));
             match std::fs::remove_file(&file) {
                 Ok(()) => {

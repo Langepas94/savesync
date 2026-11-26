@@ -13,6 +13,8 @@ pub struct Peer {
     pub public_key: Vec<u8>,
     pub certificate: Vec<u8>,
     pub address: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PeerStatus {
@@ -83,6 +85,7 @@ impl Identity {
             public_key: self.public(),
             certificate: self.certificate.clone(),
             address,
+            name: None,
         }
     }
     fn read(&self) -> io::Result<Trust> {
@@ -184,6 +187,12 @@ impl Identity {
                 .get(peer_id)
                 .and_then(|existing| existing.address.clone());
         }
+        if peer.name.is_none() {
+            peer.name = trust
+                .peers
+                .get(peer_id)
+                .and_then(|existing| existing.name.clone());
+        }
         trust.peers.insert(peer_id.into(), peer);
         self.write(&trust)
     }
@@ -191,6 +200,12 @@ impl Identity {
         let _guard = guard(&self.directory)?;
         let mut trust = self.read()?;
         trust.peers.remove(peer_id);
+        trust.pending.remove(peer_id);
+        self.write(&trust)
+    }
+    pub fn reject(&self, peer_id: &str) -> io::Result<()> {
+        let _guard = guard(&self.directory)?;
+        let mut trust = self.read()?;
         trust.pending.remove(peer_id);
         self.write(&trust)
     }

@@ -1,0 +1,5 @@
+schema: 1
+name: Smoke Game
+slug: smoke-game
+paths:
+ - pattern: "<home>/save/*.sav"

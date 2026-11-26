@@ -58,10 +58,52 @@ pub struct FileManifest {
 /// База локации: резолвнутый паттерн, обрезанный до первого glob-символа
 /// по границе сегмента. Все файлы локации складываются относительно неё.
 pub fn location_base(resolved: &str) -> PathBuf {
-    let cut = resolved.find(['*', '?', '[']).unwrap_or(resolved.len());
+    let (prefix, _) = split_location_pattern(resolved);
+    PathBuf::from(unescape_pattern(prefix))
+}
+
+pub(crate) fn split_location_pattern(resolved: &str) -> (&str, &str) {
+    let cut = first_wildcard(resolved).unwrap_or(resolved.len());
     let prefix = &resolved[..cut];
     let dir_end = prefix.rfind('/').map(|i| i + 1).unwrap_or(0);
-    PathBuf::from(&resolved[..dir_end])
+    resolved.split_at(dir_end)
+}
+
+pub(crate) fn first_wildcard(pattern: &str) -> Option<usize> {
+    let bytes = pattern.as_bytes();
+    let mut offset = 0;
+    while offset < bytes.len() {
+        if escaped_symbol(bytes, offset).is_some() {
+            offset += 3;
+        } else if matches!(bytes[offset], b'*' | b'?' | b'[') {
+            return Some(offset);
+        } else {
+            offset += 1;
+        }
+    }
+    None
+}
+
+pub(crate) fn unescape_pattern(pattern: &str) -> String {
+    let mut result = String::with_capacity(pattern.len());
+    let mut offset = 0;
+    while let Some(symbol) = pattern[offset..].chars().next() {
+        if let Some(escaped) = escaped_symbol(pattern.as_bytes(), offset) {
+            result.push(char::from(escaped));
+            offset += 3;
+        } else {
+            result.push(symbol);
+            offset += symbol.len_utf8();
+        }
+    }
+    result
+}
+
+fn escaped_symbol(bytes: &[u8], offset: usize) -> Option<u8> {
+    match bytes.get(offset..offset + 3) {
+        Some([b'[', symbol @ (b'*' | b'?' | b'[' | b']'), b']']) => Some(*symbol),
+        _ => None,
+    }
 }
 
 /// Рекурсивно собирает файлы локации (hits могут быть файлами и папками).
@@ -77,7 +119,7 @@ fn collect_files(base: &Path, hit: &Path, out: &mut Vec<(PathBuf, PathBuf)>) -> 
         for entry in std::fs::read_dir(hit)? {
             collect_files(base, &entry?.path(), out)?;
         }
-    } else if hit.is_file() {
+    } else if hit.is_file() && !crate::backup::is_backup_archive(hit) {
         let rel = hit.strip_prefix(base).map(PathBuf::from).map_err(|_| {
             io::Error::new(
                 io::ErrorKind::InvalidInput,

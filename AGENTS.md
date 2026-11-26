@@ -1,6 +1,12 @@
 # SaveSync Agents
 
-## Overview
+## Local coding tools
+
+- Run `ast-index update` from this directory at the start of code work and after edits or branch changes; run `ast-index rebuild` if the cache is missing. `.ast-index.yaml` limits indexing to project source and excludes build artifacts.
+- Use `ast-index search <name>`, `ast-index symbol <name>`, `ast-index refs <name>`, and `ast-index outline <file>` for structural navigation. Use `rg` for text and files. Run `ast-index watch` in a separate terminal for live updates when needed.
+- Caveman is enabled by default. Read `.agents/skills/caveman/SKILL.md` and apply its concise response style in the user's language, preserving code, commands, paths, errors, and technical meaning. `stop caveman` or `normal mode` disables it for the session. Do not change the model, reasoning effort, or validation requirements.
+
+## Project overview
 SaveSync uses a multi-agent architecture where each component is implemented as a separate crate in the Rust workspace. The system consists of four main agents that work together to provide cross-platform save synchronization.
 
 ## Agent Structure

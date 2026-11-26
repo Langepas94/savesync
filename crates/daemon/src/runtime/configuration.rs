@@ -17,7 +17,11 @@ impl Runtime {
     pub fn start_lan(&mut self) -> io::Result<()> {
         self.serving = true;
         if let Some(lan) = &self.config.backends.lan {
-            self.lan_server = Some(LanServer::start(self.lan_store(), lan.port, &lan.pin)?);
+            self.lan_server = Some(LanServer::start_named(
+                self.lan_store(),
+                lan.port,
+                &self.config.device_name,
+            )?);
         }
         Ok(())
     }
@@ -26,17 +30,29 @@ impl Runtime {
     fn apply_config(&mut self, mut config: Config) -> io::Result<()> {
         config.device_id = self.config.device_id.clone();
         config.device_name = self.config.device_name.clone();
+        if config.backups.dir != self.config.backups.dir {
+            if let Some(directory) = &config.backups.dir {
+                std::fs::create_dir_all(directory)?;
+            }
+        }
         let same_port = self
             .lan_server
             .as_ref()
             .zip(config.backends.lan.as_ref())
             .is_some_and(|(server, lan)| server.port == lan.port);
+        let pin_changed = self
+            .config
+            .backends
+            .lan
+            .as_ref()
+            .zip(config.backends.lan.as_ref())
+            .is_some_and(|(current, next)| current.pin != next.pin);
         let replacement = if self.serving && !same_port {
             config
                 .backends
                 .lan
                 .as_ref()
-                .map(|lan| LanServer::start(self.lan_store(), lan.port, &lan.pin))
+                .map(|lan| LanServer::start_named(self.lan_store(), lan.port, &config.device_name))
                 .transpose()?
         } else {
             None
@@ -57,17 +73,17 @@ impl Runtime {
         config = Config::load(&path)?
             .ok_or_else(|| io::Error::other("saved configuration unavailable"))?;
         if self.serving {
-            if same_port {
+            if same_port && pin_changed {
                 self.lan_server
                     .as_ref()
                     .unwrap()
                     .set_pin(&config.backends.lan.as_ref().unwrap().pin);
-            } else {
+            } else if !same_port {
                 self.lan_server = replacement;
             }
         }
         self.config = config;
-        self.manifests = rebuilt.manifests;
+        self.base_manifests = rebuilt.base_manifests;
         self.refresh_catalog();
         Ok(())
     }

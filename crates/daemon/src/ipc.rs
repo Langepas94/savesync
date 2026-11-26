@@ -103,7 +103,13 @@ fn dispatch(
                     return Response::err(req.id, "daemon is stopping");
                 }
                 match cache.read() {
-                    Ok(value) => Response::ok(req.id, value.clone()),
+                    Ok(value) => {
+                        let mut snapshot = value.clone();
+                        if let savesync_core::ipc::ResponsePayload::Status(status) = &mut snapshot {
+                            status.last_backup = runtime.last_backup();
+                        }
+                        Response::ok(req.id, snapshot)
+                    }
                     Err(_) => Response::err(req.id, "status cache unavailable"),
                 }
             }
@@ -120,6 +126,25 @@ fn dispatch(
             Err(TryLockError::Poisoned(_)) => Response::err(req.id, "daemon state poisoned"),
         };
     }
+    if matches!(req.method, Method::LanPresence) {
+        let directory = match runtime.lock() {
+            Ok(runtime) if !runtime.shutdown_requested => runtime.lan_presence_directory(),
+            Ok(_) => return Response::err(req.id, "daemon is stopping"),
+            Err(_) => return Response::err(req.id, "daemon state poisoned"),
+        };
+        return match crate::runtime::lan_presence(directory) {
+            Ok(payload) => Response::ok(req.id, payload),
+            Err(error) => Response::err(req.id, error.to_string()),
+        };
+    }
+    if let Method::CloudCheck { provider } = req.method {
+        let reference = match runtime.lock() {
+            Ok(runtime) if !runtime.shutdown_requested => runtime.cloud_reference(provider),
+            Ok(_) => return Response::err(req.id, "daemon is stopping"),
+            Err(_) => return Response::err(req.id, "daemon state poisoned"),
+        };
+        return Response::ok(req.id, crate::runtime::cloud_check(provider, reference));
+    }
     let mut rt = match runtime.lock() {
         Ok(rt) => rt,
         Err(_) => return Response::err(req.id, "daemon state poisoned"),
@@ -132,8 +157,18 @@ fn dispatch(
         Method::Status => rt.status(),
         Method::Scan => rt.scan(),
         Method::ReloadManifests => rt.reload_manifests(),
+        Method::AddCustomGame { name, paths } => match rt.add_custom_game(name, paths) {
+            Ok(payload) => payload,
+            Err(error) => return Response::err(req.id, error),
+        },
+        Method::SetGameHidden { game_key, hidden } => rt.set_game_hidden(game_key, *hidden),
         Method::Lan { action } => rt.lan_action(action.clone()),
-        Method::OAuthBegin { provider } => rt.oauth_begin(*provider),
+        Method::LanPresence => unreachable!(),
+        Method::OAuthBegin {
+            provider,
+            client_id,
+        } => rt.oauth_begin(*provider, client_id.as_deref()),
+        Method::CloudCheck { .. } => unreachable!(),
         Method::OAuthPoll { provider } => rt.oauth_poll(*provider),
         Method::OAuthCancel { provider } => rt.oauth_cancel(*provider),
         Method::Sync { game_key } => rt.sync(game_key.as_deref()),
@@ -143,6 +178,7 @@ fn dispatch(
             version_id,
         } => rt.restore(game_key, version_id),
         Method::Backup { game_key } => rt.backup_game(game_key),
+        Method::BackupAll => rt.backup_all(),
         Method::GetConfig => rt.get_config(),
         Method::SaveConfig { config } => rt.save_config(*config.clone()),
     };
@@ -185,11 +221,13 @@ mod tests {
         Runtime {
             shutdown_requested: false,
             config,
+            base_manifests: Default::default(),
             manifests: Default::default(),
             platform: savesync_core::paths::Platform::current(),
             roots: Default::default(),
             state_dir: dir.join("state"),
             last_scan: Vec::new(),
+            hidden_games: Default::default(),
             lan_server: None,
             serving: false,
             oauth_jobs: Default::default(),
@@ -236,6 +274,36 @@ mod tests {
             other => panic!("unexpected: {other:?}"),
         }
 
+        let save = dir.join("initial.sav");
+        let replacement = dir.join("replacement.sav");
+        std::fs::write(&save, b"initial save").unwrap();
+        std::fs::write(&replacement, b"replacement save").unwrap();
+        let add = |path: &std::path::Path| Method::AddCustomGame {
+            name: "Readded Game".into(),
+            paths: vec![path.to_string_lossy().into_owned()],
+        };
+        let key = "custom:readded-game";
+        for (method, count) in [
+            (add(&save), 1),
+            (
+                Method::SetGameHidden {
+                    game_key: key.into(),
+                    hidden: true,
+                },
+                0,
+            ),
+            (add(&replacement), 1),
+        ] {
+            let response = call(&name, Request::new(3, method)).unwrap();
+            assert!(
+                matches!(response.result, Some(ResponsePayload::Scan(scan)) if scan.found == count)
+            );
+        }
+        let response = call(&name, Request::new(4, Method::Status)).unwrap();
+        assert!(
+            matches!(response.result, Some(ResponsePayload::Status(status))
+            if status.hidden_games.is_empty() && status.games[0].game_key == key && status.games[0].state == "no_versions")
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 

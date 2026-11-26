@@ -31,14 +31,17 @@ pub(crate) fn merge(target: &mut Index, source: &Index) -> io::Result<()> {
         let mut versions = std::collections::HashMap::new();
         for version in &game.versions {
             if let Some(previous) = versions.insert(&version.id, version) {
-                if previous != version {
+                if !previous.same_record(version) {
                     return Err(invalid("conflicting immutable version records"));
                 }
             }
         }
         if let Some(existing) = target.games.get(key) {
             for version in &game.versions {
-                if existing.get(&version.id).is_some_and(|old| old != version) {
+                if existing
+                    .get(&version.id)
+                    .is_some_and(|old| !old.same_record(version))
+                {
                     return Err(invalid("conflicting immutable version records"));
                 }
             }

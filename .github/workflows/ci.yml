@@ -7,6 +7,11 @@ on:
   pull_request:
     branches: [main, develop]
   workflow_dispatch:
+    inputs:
+      sign_steamos:
+        description: Sign the SteamOS update package for GitHub Releases
+        type: boolean
+        default: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -40,6 +45,8 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev libdbus-1-dev pkg-config
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main' }}
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
   test:
@@ -56,6 +63,8 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev libdbus-1-dev pkg-config
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main' }}
       # Матрица кейсов путей Win/Linux обязана прогоняться на обеих ОС.
       - run: cargo test --workspace
       - run: cargo build -p savesync-daemon
@@ -94,6 +103,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main' }}
       - run: cargo build -p savesync-daemon -p savesync-app
       - name: ensure Inno Setup compiler
         shell: pwsh
@@ -109,28 +120,66 @@ jobs:
           name: savesync-development-installer
           path: dist/savesync-setup-dev.exe*
 
+  steamos-package:
+    name: SteamOS package (Rust 1.89, glibc 2.35)
+    runs-on: ubuntu-latest
+    container: ubuntu:22.04
+    steps:
+      - name: build dependencies in compatibility container
+        run: apt-get update && apt-get install -y ca-certificates curl git build-essential pkg-config python3 libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev libdbus-1-dev
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.89.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: steamos-glibc235-rust189
+          save-if: ${{ github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main' }}
+      - run: cargo build --release --locked --workspace
+        env:
+          SAVESYNC_UPDATE_PUBLIC_KEY: ${{ vars.SAVESYNC_UPDATE_PUBLIC_KEY }}
+          SAVESYNC_YANDEX_PUBLIC_CLIENT_ID: ${{ vars.SAVESYNC_YANDEX_PUBLIC_CLIENT_ID }}
+      - run: npm ci --prefix decky-plugin
+      - run: npm run build --prefix decky-plugin
+      - run: bash packaging/package-steamos.sh target/release dist
+      - name: Sign SteamOS update checksum
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.sign_steamos
+        shell: bash
+        env:
+          UPDATE_PRIVATE_KEY: ${{ secrets.SAVESYNC_UPDATE_PRIVATE_KEY_BASE64 }}
+          UPDATE_PUBLIC_KEY: ${{ vars.SAVESYNC_UPDATE_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$UPDATE_PRIVATE_KEY" && test -n "$UPDATE_PUBLIC_KEY"
+          keyfile="$(mktemp)"
+          trap 'rm -f "$keyfile"' EXIT
+          printf '%s' "$UPDATE_PRIVATE_KEY" | base64 -d > "$keyfile"
+          actual="$(openssl pkey -in "$keyfile" -pubout -outform DER | tail -c 32 | od -An -tx1 | tr -d ' \n')"
+          test "$actual" = "$UPDATE_PUBLIC_KEY"
+          openssl pkeyutl -sign -rawin -inkey "$keyfile" -in dist/savesync-steamos.tar.gz.sha256 -out dist/savesync-steamos.tar.gz.sha256.sig
+      - run: python3 scripts/check_steamos_package.py dist/savesync-steamos.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: savesync-x86_64-unknown-linux-gnu
+          path: |
+            dist/savesync-steamos.tar.gz*
+            dist/SaveSync-SteamDeck.run*
+
   release:
-    name: release artifacts
+    name: Windows release installer
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [fmt, clippy, test, decky-plugin, windows-installer]
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
+    needs: [fmt, clippy, test, decky-plugin, windows-installer, steamos-package]
+    runs-on: windows-latest
+    env:
+      SAVESYNC_UPDATE_PUBLIC_KEY: ${{ vars.SAVESYNC_UPDATE_PUBLIC_KEY }}
+      SAVESYNC_YANDEX_PUBLIC_CLIENT_ID: ${{ vars.SAVESYNC_YANDEX_PUBLIC_CLIENT_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-      - name: install linux gui deps
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev libssl-dev libdbus-1-dev pkg-config
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/main' }}
       - name: validate release version
         shell: python
         run: |
@@ -138,52 +187,36 @@ jobs:
           version = re.search(r'^version = "([^"]+)"', open("Cargo.toml").read(), re.MULTILINE).group(1)
           assert os.environ["GITHUB_REF_NAME"] == "v" + version, "tag must match workspace version"
       - name: ensure release installer compiler
-        if: runner.os == 'Windows'
         shell: pwsh
         run: ./packaging/windows/ensure-compiler.ps1
-      - name: import Windows signing identity
-        if: runner.os == 'Windows'
+      - name: import Windows publisher identity when configured
         shell: pwsh
         env:
           SAVESYNC_SIGNING_PFX_BASE64: ${{ secrets.SAVESYNC_SIGNING_PFX_BASE64 }}
           SAVESYNC_SIGNING_PFX_PASSWORD: ${{ secrets.SAVESYNC_SIGNING_PFX_PASSWORD }}
-        run: ./packaging/windows/prepare-signing.ps1
-      - run: cargo build --release --workspace --target ${{ matrix.target }}
-      - name: build signed Windows package
-        if: runner.os == 'Windows'
+        run: |
+          if ($env:SAVESYNC_UPDATE_PUBLIC_KEY -notmatch '^[0-9a-fA-F]{64}$') { throw 'Project update key is missing' }
+          if ($env:SAVESYNC_SIGNING_PFX_BASE64 -or $env:SAVESYNC_SIGNING_PFX_PASSWORD) {
+            ./packaging/windows/prepare-signing.ps1
+          }
+      - run: cargo build --release --locked --workspace
+      - name: build Windows release installer
         shell: pwsh
         run: |
           $version = $env:GITHUB_REF_NAME.TrimStart('v')
-          ./packaging/windows/build.ps1 -SourceDir target/${{ matrix.target }}/release -Version $version -Signed
-      - name: build SteamOS package
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          npm ci --prefix decky-plugin
-          npm run build --prefix decky-plugin
-          mkdir -p dist/savesync-steamos/systemd
-          cp target/${{ matrix.target }}/release/savesync-daemon target/${{ matrix.target }}/release/savesync-app dist/savesync-steamos/
-          cp packaging/install-steamos.sh dist/savesync-steamos/
-          cp packaging/verify-steamos.sh dist/savesync-steamos/
-          cp packaging/systemd/savesync.service dist/savesync-steamos/systemd/
-          mkdir -p dist/savesync-steamos/decky-plugin/dist
-          cp decky-plugin/main.py decky-plugin/plugin.json decky-plugin/package.json dist/savesync-steamos/decky-plugin/
-          cp -r decky-plugin/dist/. dist/savesync-steamos/decky-plugin/dist/
-          tar -czf dist/savesync-steamos.tar.gz -C dist savesync-steamos
-          cd dist && sha256sum savesync-steamos.tar.gz > savesync-steamos.tar.gz.sha256
-
-      - name: upload artifacts
-        uses: actions/upload-artifact@v4
+          ./packaging/windows/build.ps1 -SourceDir target/release -Version $version -Release -Signed:([bool]$env:SAVESYNC_SIGNER_SHA256)
+      - name: isolated release installer upgrade
+        shell: pwsh
+        run: ./packaging/windows/smoke.ps1 -Installer dist/savesync-setup.exe
+      - uses: actions/upload-artifact@v4
         with:
-          name: savesync-${{ matrix.target }}
-          path: |
-            dist/savesync-setup.exe*
-            dist/savesync-steamos.tar.gz*
+          name: savesync-x86_64-pc-windows-msvc
+          path: dist/savesync-setup.exe*
 
   publish-draft:
     name: signed release draft
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [release]
+    needs: [release, steamos-package]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -193,6 +226,23 @@ jobs:
           pattern: savesync-x86_64-*
           path: artifacts
           merge-multiple: true
+      - name: sign Windows update for SaveSync
+        shell: bash
+        env:
+          UPDATE_PRIVATE_KEY: ${{ secrets.SAVESYNC_UPDATE_PRIVATE_KEY_BASE64 }}
+          UPDATE_PUBLIC_KEY: ${{ vars.SAVESYNC_UPDATE_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$UPDATE_PRIVATE_KEY" && test -n "$UPDATE_PUBLIC_KEY"
+          keyfile="$(mktemp)"
+          message="$(mktemp)"
+          trap 'rm -f "$keyfile" "$message"' EXIT
+          printf '%s' "$UPDATE_PRIVATE_KEY" | base64 -d > "$keyfile"
+          actual="$(openssl pkey -in "$keyfile" -pubout -outform DER | tail -c 32 | od -An -tx1 | tr -d ' \n')"
+          test "$actual" = "$UPDATE_PUBLIC_KEY"
+          (cd artifacts && sha256sum --check savesync-setup.exe.sha256)
+          { printf 'SaveSync Windows update %s\n' "${GITHUB_REF_NAME#v}"; cat artifacts/savesync-setup.exe.sha256; } > "$message"
+          openssl pkeyutl -sign -rawin -inkey "$keyfile" -in "$message" -out artifacts/savesync-setup.exe.sha256.sig
       - name: create reviewable release
         env:
           GH_TOKEN: ${{ github.token }}

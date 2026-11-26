@@ -120,8 +120,29 @@ fn cmd_via_daemon_or_direct(method: Method) -> i32 {
         Method::Shutdown => rt.prepare_shutdown(),
         Method::Scan => rt.scan(),
         Method::ReloadManifests => rt.reload_manifests(),
+        Method::AddCustomGame { name, paths } => match rt.add_custom_game(name, paths) {
+            Ok(payload) => payload,
+            Err(error) => {
+                eprintln!("ошибка: {error}");
+                return 1;
+            }
+        },
+        Method::SetGameHidden { game_key, hidden } => rt.set_game_hidden(game_key, *hidden),
         Method::Lan { action } => rt.lan_action(action.clone()),
-        Method::OAuthBegin { provider } => rt.oauth_begin(*provider),
+        Method::LanPresence => match crate::runtime::lan_presence(rt.lan_presence_directory()) {
+            Ok(payload) => payload,
+            Err(error) => {
+                eprintln!("{error}");
+                return 1;
+            }
+        },
+        Method::OAuthBegin {
+            provider,
+            client_id,
+        } => rt.oauth_begin(*provider, client_id.as_deref()),
+        Method::CloudCheck { provider } => {
+            crate::runtime::cloud_check(*provider, rt.cloud_reference(*provider))
+        }
         Method::OAuthPoll { provider } => rt.oauth_poll(*provider),
         Method::OAuthCancel { provider } => rt.oauth_cancel(*provider),
         Method::Sync { game_key } => rt.sync(game_key.as_deref()),
@@ -132,6 +153,7 @@ fn cmd_via_daemon_or_direct(method: Method) -> i32 {
             version_id,
         } => rt.restore(game_key, version_id),
         Method::Backup { game_key } => rt.backup_game(game_key),
+        Method::BackupAll => rt.backup_all(),
         Method::GetConfig => rt.get_config(),
         Method::SaveConfig { config } => rt.save_config(*config.clone()),
     };
@@ -164,6 +186,7 @@ fn payload_exit_code(payload: &ResponsePayload) -> i32 {
     match payload {
         ResponsePayload::Lan(status) if status.error.is_some() => 1,
         ResponsePayload::OAuthStatus(status) if status.state == "error" => 1,
+        ResponsePayload::BackupBatch(batch) if !batch.errors.is_empty() => 1,
         ResponsePayload::Sync(sync)
             if sync.results.iter().any(|result| {
                 matches!(

@@ -1,0 +1,9 @@
+schema: 1
+name: Test Game
+slug: test-game
+ids:
+  steam: ["999001"]
+paths:
+  - pattern: "<home>/game/saves"
+    os: any
+    tags: [save]

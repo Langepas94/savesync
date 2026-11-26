@@ -63,10 +63,17 @@ def run(binary: Path) -> None:
         scan = command("pc", "scan")
         assert scan["data"]["found"] == 1, scan
         outcome("pc", "uploaded", "sync", "smoke-game")
-        outcome("deck", "applied", "sync", "smoke-game")
+        outcome("deck", "conflict", "sync", "smoke-game", exit_code=1)
+        assert (root / "deck/home/saves/slot.sav").read_text() == "deck-original"
+        history = command("deck", "history", "smoke-game")["data"]
+        assert len(history["heads"]) == 2, history
+        selected = next(version["id"] for version in history["versions"]
+                        if version["id"] in history["heads"] and version["device"] == "pc")
+        outcome("deck", "applied", "restore", "smoke-game", selected)
         assert (root / "deck/home/saves/slot.sav").read_text() == "pc-original"
         assert list((root / "deck/appdata/savesync/state/backups").rglob("slot.sav"))
         outcome("deck", "up_to_date", "sync", "smoke-game")
+        outcome("pc", "applied", "sync", "smoke-game")
 
         save("pc", "pc-branch")
         outcome("pc", "uploaded", "sync", "smoke-game")
@@ -99,6 +106,13 @@ def run(binary: Path) -> None:
         outcome("pc", "uploaded", "sync", "custom:custom-test")
         command("pc", "manifests", "import", str(manifests), parse=False)
         assert "custom:custom-test" in command("pc", "custom", "list", parse=False)
+        sentinel = root / "pc/appdata/savesync/state/sentinel.yaml"
+        sentinel.write_text("must survive custom remove", encoding="utf-8")
+        for slug in ("../sentinel", "custom:../sentinel", "..\\sentinel", str(sentinel.with_suffix(""))):
+            command("pc", "custom", "remove", slug, expect=2, parse=False)
+            assert sentinel.read_text(encoding="utf-8") == "must survive custom remove"
+        command("pc", "custom", "add", "Disposable Rule", "--path", "<home>/saves/*.sav", parse=False)
+        command("pc", "custom", "remove", "custom:disposable-rule", parse=False)
 
         # A separate namespace avoids touching any real user's running daemon.
         log = root / "daemon.log"
