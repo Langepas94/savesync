@@ -7,7 +7,8 @@ pub(super) fn resolve(
     rules: &mut Vec<PathRule>,
     folder: &Path,
     roots: &Roots,
-    shortcut: Option<(&str, &str)>,
+    shortcut_id: Option<&str>,
+    users: &BTreeSet<PathBuf>,
 ) {
     if !rules.iter().any(|rule| linux_prefix_tail(rule).is_some()) {
         return;
@@ -19,7 +20,6 @@ pub(super) fn resolve(
                 .get_or_insert_with(|| format!("windows/{identity}"));
         }
     }
-    let prefixes = find_prefixes(folder, roots, shortcut.map(|(_, options)| options));
     let steam_prefixes: Vec<_> = roots
         .steam_libraries
         .iter()
@@ -29,10 +29,6 @@ pub(super) fn resolve(
                 Some((id, path))
             })
         })
-        .collect();
-    let users: BTreeSet<_> = prefixes
-        .iter()
-        .flat_map(|prefix| directories(prefix, "drive_c/users/*"))
         .collect();
     let installation_dirs = installation_directories(folder);
     let mut expanded = Vec::new();
@@ -58,7 +54,7 @@ pub(super) fn resolve(
                 steam_patterns.insert(canonical, format!("<steamCompat>/{id}/{tail}"));
             }
         }
-        for user in &users {
+        for user in users {
             patterns.extend(existing_patterns(user, user_tail));
             if let Some(relative) = user_tail.strip_prefix("Documents/") {
                 patterns.extend(existing_patterns(user, &format!("My Documents/{relative}")));
@@ -72,7 +68,7 @@ pub(super) fn resolve(
         let portable_patterns = portable_patterns(folder, &installation_dirs, user_tail);
         if patterns.is_empty() {
             let mut fallback = rule.clone();
-            if let Some((id, _)) = shortcut {
+            if let Some(id) = shortcut_id {
                 fallback.pattern = format!("<steamCompat>/{id}/{tail}");
             }
             expanded.push(fallback);
@@ -100,6 +96,17 @@ pub(super) fn resolve(
     expanded
         .retain(|rule| linux_prefix_tail(rule).is_none() || patterns.insert(rule.pattern.clone()));
     *rules = expanded;
+}
+
+pub(super) fn windows_users(
+    folder: &Path,
+    roots: &Roots,
+    launch_options: Option<&str>,
+) -> BTreeSet<PathBuf> {
+    find_prefixes(folder, roots, launch_options)
+        .iter()
+        .flat_map(|prefix| directories(prefix, "drive_c/users/*"))
+        .collect()
 }
 
 fn installation_directories(folder: &Path) -> BTreeMap<String, Vec<PathBuf>> {
@@ -177,10 +184,13 @@ fn find_prefixes(folder: &Path, roots: &Roots, launch_options: Option<&str>) -> 
         for tail in [
             ".wine",
             "Games/*",
+            "Games/umu/*",
+            "Games/umu/*/pfx",
             "Games/Heroic/Prefixes/*",
             "Games/Heroic/Prefixes/default/*",
             ".var/app/com.usebottles.bottles/data/bottles/bottles/*",
             ".var/app/com.heroicgameslauncher.hgl/config/heroic/Prefixes/*",
+            ".var/app/*/.wine",
         ] {
             prefixes.extend(directories(home, tail));
         }

@@ -205,12 +205,12 @@ impl Runtime {
                 self.manifests.insert(resolved);
             }
         }
-        let mut known: std::collections::HashSet<String> =
-            savesync_core::steam::match_manifests(&self.manifests, &apps)
-                .into_iter()
-                .map(|entry| entry.game_key)
-                .collect();
-        known.extend(manual_keys);
+        let installed = savesync_core::steam::match_manifests(&self.manifests, &apps);
+        let mut known: std::collections::HashSet<String> = installed
+            .iter()
+            .map(|entry| entry.game_key.clone())
+            .collect();
+        known.extend(manual_keys.iter().cloned());
         for manifest in savesync_core::installation::discover_steam_shortcuts(
             &self.manifests,
             &self.roots,
@@ -223,6 +223,39 @@ impl Runtime {
         }
         known.extend(index.games.into_keys());
         self.last_scan = scanner::scan_catalog(&self.manifests, self.platform, &self.roots, &known);
+        for entry in installed
+            .into_iter()
+            .filter(|entry| !manual_keys.contains(&entry.game_key))
+        {
+            let Some(game) = self
+                .last_scan
+                .iter_mut()
+                .find(|game| game.game_key == entry.game_key && game.locations.is_empty())
+            else {
+                continue;
+            };
+            let Some(folder) = self.roots.steam_installations.get(&entry.appid) else {
+                continue;
+            };
+            let Some(mut manifest) = self.manifests.get(&entry.game_key).cloned() else {
+                continue;
+            };
+            let paths = savesync_core::installation::relocated_installed_profiles(
+                &manifest,
+                folder,
+                &self.roots,
+                self.platform,
+            );
+            if paths.is_empty() {
+                continue;
+            }
+            manifest.paths.extend(paths);
+            let catalog = ManifestDb::from_entries(vec![manifest.clone()]);
+            if let Some(found) = scanner::scan(&catalog, self.platform, &self.roots).pop() {
+                self.manifests.insert(manifest);
+                *game = found;
+            }
+        }
         self.last_scan
             .retain(|g| !self.hidden_games.contains_key(&g.game_key));
     }

@@ -281,11 +281,19 @@ fn resolve_folder(
                 title_initials(candidate).is_some_and(|short| abbreviations.contains(&short))
             })
         });
+    if manifest.is_none() && !is_installation {
+        return (result, None);
+    }
+    let users = if platform == Platform::Linux {
+        prefixes::windows_users(folder, roots, shortcut.map(|entry| entry.options.as_str()))
+    } else {
+        BTreeSet::new()
+    };
     let Some(manifest) = manifest else {
         // A directory with an executable is not safe to back up as a save folder.
-        if is_installation {
-            result.paths = fallback::save_rules(folder, platform);
-        }
+        result.paths = fallback::save_rules(folder, platform);
+        let profiles = relocated_profile_rules(roots, &users, &result, platform);
+        result.paths.extend(profiles);
         return (result, None);
     };
     result.paths = manifest.paths.clone();
@@ -297,13 +305,66 @@ fn resolve_folder(
             &mut result.paths,
             folder,
             roots,
-            shortcut.map(|entry| (entry.app_id.as_str(), entry.options.as_str())),
+            shortcut.map(|entry| entry.app_id.as_str()),
+            &users,
         );
     }
+    result
+        .paths
+        .extend(relocated_profile_rules(roots, &users, manifest, platform));
     if is_installation {
         result.paths.extend(fallback::save_rules(folder, platform));
     }
     (result, Some(manifest.slug.clone()))
+}
+
+fn relocated_profile_rules(
+    roots: &Roots,
+    users: &BTreeSet<PathBuf>,
+    game: &Manifest,
+    platform: Platform,
+) -> Vec<crate::manifest::PathRule> {
+    let windows_areas = [
+        "AppData/Roaming",
+        "AppData/Local",
+        "AppData/LocalLow",
+        "Application Data",
+        "Saved Games",
+        "Documents",
+        "My Documents",
+    ];
+    let areas = users
+        .iter()
+        .flat_map(|user| windows_areas.map(|area| user.join(area)))
+        .chain(
+            [
+                &roots.documents,
+                &roots.win_appdata,
+                &roots.win_local_appdata,
+                &roots.win_saved_games,
+                &roots.xdg_data,
+                &roots.xdg_config,
+            ]
+            .into_iter()
+            .flatten()
+            .cloned(),
+        )
+        .collect::<Vec<_>>();
+    fallback::profile_save_rules(areas.iter().map(PathBuf::as_path), game, platform)
+}
+
+pub fn relocated_installed_profiles(
+    game: &Manifest,
+    folder: &Path,
+    roots: &Roots,
+    platform: Platform,
+) -> Vec<crate::manifest::PathRule> {
+    let users = if platform == Platform::Linux {
+        prefixes::windows_users(folder, roots, None)
+    } else {
+        BTreeSet::new()
+    };
+    relocated_profile_rules(roots, &users, game, platform)
 }
 
 pub(crate) fn bind_installation_rules(manifest: &mut Manifest, folder: &Path) {
@@ -494,6 +555,64 @@ mod tests {
             &dir.path().join("snapshot.zip"),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn finds_numbered_profile_saves_relocated_to_appdata_without_steam_shortcut() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("home/Downloads/Red Dead Redemption 2");
+        let steam = dir.path().join("home/.local/share/Steam");
+        let user = steam.join("steamapps/compatdata/2300690450/pfx/drive_c/users/steamuser");
+        let cabinet = user.join("AppData/Roaming");
+        let paths = [
+            cabinet.join(".1911/Red Dead Redemption 2/profile/SRDR30000"),
+            cabinet.join("Goldberg SocialClub Emu Saves/RDR2/12345678/SRDR30001"),
+        ];
+        for path in paths.iter().cloned().chain([
+            cabinet.join(".1911/Other Game/profile/SRDR30002"),
+            cabinet.join(".1911/Red Dead Redemption 2/cache/chunk00003"),
+            cabinet.join(".1911/Red Dead Redemption 2/log20261126"),
+            cabinet.join(".1911/Red Dead Redemption 2/profile/settings.ini"),
+        ]) {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, b"test").unwrap();
+        }
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("RDR2.exe"), b"binary").unwrap();
+        let custom = Manifest::custom(
+            "rdr2",
+            vec![PathRule {
+                location: None,
+                pattern: crate::paths::literal_save_pattern(&folder),
+                os: Os::Linux,
+                tags: vec![],
+            }],
+        )
+        .unwrap();
+        let roots = Roots {
+            steam_libraries: vec![steam],
+            home: Some(dir.path().join("home")),
+            ..Roots::default()
+        };
+        let resolved = resolve_custom(&custom, &ManifestDb::default(), &roots, Platform::Linux);
+        let found = crate::scanner::scan(
+            &ManifestDb::from_entries(vec![resolved]),
+            Platform::Linux,
+            &roots,
+        );
+        let actual: HashSet<_> = found
+            .iter()
+            .flat_map(|game| &game.locations)
+            .flat_map(|location| &location.hits)
+            .map(|hit| crate::paths::canonical_path(hit))
+            .collect();
+        assert_eq!(
+            actual,
+            paths
+                .iter()
+                .map(|path| crate::paths::canonical_path(path))
+                .collect()
+        );
     }
 
     #[test]
