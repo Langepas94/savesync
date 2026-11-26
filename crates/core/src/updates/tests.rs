@@ -64,6 +64,7 @@ fn release_check_distinguishes_an_empty_release_feed_from_denied_access() {
             }
         });
         let client = Client {
+            release_base: RELEASES.into(),
             api_base,
             agent: ureq::AgentBuilder::new()
                 .timeout(std::time::Duration::from_secs(2))
@@ -77,6 +78,59 @@ fn release_check_distinguishes_an_empty_release_feed_from_denied_access() {
         }
         server.join().unwrap();
     }
+}
+
+#[test]
+fn rate_limited_check_uses_the_public_latest_release_permalink() {
+    use std::io::{BufRead, BufReader};
+    use std::net::TcpListener;
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = std::thread::spawn(move || {
+        for (path, status, headers) in [
+            (
+                "/api/releases/latest",
+                "403 Forbidden",
+                "X-RateLimit-Remaining: 0\r\n".to_string(),
+            ),
+            (
+                "/releases/latest",
+                "302 Found",
+                format!("Location: {RELEASES}/tag/v9.0.0\r\n"),
+            ),
+        ] {
+            let (mut socket, _) = listener.accept().unwrap();
+            let request: Vec<_> = BufReader::new(&socket)
+                .lines()
+                .map(Result::unwrap)
+                .take_while(|line| !line.is_empty())
+                .collect();
+            assert_eq!(request[0], format!("GET {path} HTTP/1.1"));
+            write!(
+                socket,
+                "HTTP/1.1 {status}\r\n{headers}Content-Length: 0\r\nConnection: close\r\n\r\n"
+            )
+            .unwrap();
+        }
+    });
+    let client = Client {
+        api_base: format!("http://{address}/api"),
+        release_base: format!("http://{address}/releases"),
+        agent: ureq::AgentBuilder::new()
+            .redirects(0)
+            .timeout(std::time::Duration::from_secs(2))
+            .build(),
+    };
+    let ReleaseCheck::Available(release) = check_with(&client).unwrap() else {
+        panic!("expected an update")
+    };
+    assert_eq!(release.version, semver::Version::new(9, 0, 0));
+    assert_eq!(release.installer.id, 0);
+    assert_eq!(
+        release.signature.unwrap().name,
+        format!("{}.sha256.sig", platform_package())
+    );
+    server.join().unwrap();
 }
 
 fn metadata(tag: &str) -> serde_json::Value {
@@ -226,6 +280,7 @@ fn windows_update_download_requires_valid_signature_and_matching_installer() {
         });
         let client = Client {
             api_base: format!("http://{address}"),
+            release_base: RELEASES.into(),
             agent: ureq::AgentBuilder::new()
                 .timeout(std::time::Duration::from_secs(2))
                 .build(),

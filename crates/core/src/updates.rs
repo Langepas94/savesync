@@ -6,6 +6,7 @@ use std::{
     path::{Path, PathBuf},
 };
 const API: &str = "https://api.github.com/repos/Langepas94/savesync";
+const RELEASES: &str = "https://github.com/Langepas94/savesync/releases";
 const INSTALLER: &str = "savesync-setup.exe";
 const MAX_INSTALLER: u64 = 300 * 1024 * 1024;
 #[derive(Debug, Clone, Deserialize)]
@@ -38,12 +39,14 @@ struct Metadata {
 }
 struct Client {
     api_base: String,
+    release_base: String,
     agent: ureq::Agent,
 }
 impl Client {
     fn new() -> Self {
         Self {
             api_base: API.into(),
+            release_base: RELEASES.into(),
             agent: ureq::AgentBuilder::new()
                 .timeout(std::time::Duration::from_secs(90))
                 .redirects(0)
@@ -58,14 +61,34 @@ impl Client {
             .set("X-GitHub-Api-Version", "2022-11-28")
     }
 
-    fn asset(&self, id: u64) -> io::Result<ureq::Response> {
+    fn asset(&self, release: &Release, asset: &Asset) -> io::Result<ureq::Response> {
+        if asset.id != 0 {
+            match self
+                .api(
+                    &format!("/releases/assets/{}", asset.id),
+                    "application/octet-stream",
+                )
+                .call()
+            {
+                Ok(response) => return self.follow_download(response),
+                Err(error) if is_rate_limited(&error) => (),
+                Err(error) => return Err(network_error(error)),
+            }
+        }
+        let url = format!(
+            "{}/download/v{}/{}",
+            self.release_base, release.version, asset.name
+        );
         let response = self
-            .api(
-                &format!("/releases/assets/{id}"),
-                "application/octet-stream",
-            )
+            .agent
+            .get(&url)
+            .set("User-Agent", "SaveSync")
             .call()
             .map_err(network_error)?;
+        self.follow_download(response)
+    }
+
+    fn follow_download(&self, response: ureq::Response) -> io::Result<ureq::Response> {
         if (300..400).contains(&response.status()) {
             let location = response
                 .header("Location")
@@ -89,16 +112,19 @@ impl Client {
         Ok(response)
     }
 }
+
+fn is_rate_limited(error: &ureq::Error) -> bool {
+    matches!(error, ureq::Error::Status(403 | 429, response)
+        if response.header("X-RateLimit-Remaining") == Some("0") || response.header("Retry-After").is_some())
+}
+
 fn network_error(error: ureq::Error) -> io::Error {
+    if is_rate_limited(&error) {
+        return io::Error::other(
+            "GitHub ограничил число запросов для этого IP. Повторите проверку позже.",
+        );
+    }
     match error {
-        ureq::Error::Status(403 | 429, response)
-            if response.header("X-RateLimit-Remaining") == Some("0")
-                || response.header("Retry-After").is_some() =>
-        {
-            io::Error::other(
-                "GitHub ограничил число запросов для этого IP. Повторите проверку позже.",
-            )
-        }
         ureq::Error::Status(code, _) => {
             io::Error::other(format!("GitHub Releases вернул HTTP {code}"))
         }
@@ -169,15 +195,55 @@ fn select_for(bytes: &[u8], current: &str, package: &str) -> io::Result<Option<R
     }))
 }
 fn select(bytes: &[u8], current: &str) -> io::Result<Option<Release>> {
-    select_for(
-        bytes,
-        current,
-        if cfg!(windows) {
-            INSTALLER
-        } else {
-            "savesync-steamos.tar.gz"
-        },
-    )
+    select_for(bytes, current, platform_package())
+}
+
+fn platform_package() -> &'static str {
+    if cfg!(windows) {
+        INSTALLER
+    } else {
+        "savesync-steamos.tar.gz"
+    }
+}
+
+fn public_latest(client: &Client, current: &str) -> io::Result<ReleaseCheck> {
+    let response = match client
+        .agent
+        .get(&format!("{}/latest", client.release_base))
+        .set("User-Agent", "SaveSync")
+        .call()
+    {
+        Ok(response) => response,
+        Err(ureq::Error::Status(404, _)) => return Ok(ReleaseCheck::NoPublishedRelease),
+        Err(error) => return Err(network_error(error)),
+    };
+    let page = response
+        .header("Location")
+        .filter(|_| (300..400).contains(&response.status()))
+        .ok_or_else(|| io::Error::other("missing latest release redirect"))?;
+    let tag = page
+        .strip_prefix(RELEASES)
+        .and_then(|tail| tail.strip_prefix("/tag/v"))
+        .ok_or_else(|| io::Error::other("unexpected latest release redirect"))?;
+    let version = semver::Version::parse(tag).map_err(io::Error::other)?;
+    if !version.pre.is_empty()
+        || version <= semver::Version::parse(current).map_err(io::Error::other)?
+    {
+        return Ok(ReleaseCheck::UpToDate);
+    }
+    let package = platform_package();
+    let direct = |name| Asset {
+        id: 0,
+        name,
+        size: 0,
+    };
+    Ok(ReleaseCheck::Available(Release {
+        version,
+        page_url: page.into(),
+        installer: direct(package.into()),
+        checksum: direct(format!("{package}.sha256")),
+        signature: Some(direct(format!("{package}.sha256.sig"))),
+    }))
 }
 pub fn check() -> io::Result<ReleaseCheck> {
     check_with(&Client::new())
@@ -187,6 +253,9 @@ fn check_with(client: &Client) -> io::Result<ReleaseCheck> {
     let accept = "application/vnd.github+json";
     let response = match client.api("/releases/latest", accept).call() {
         Ok(response) => response,
+        Err(error) if is_rate_limited(&error) => {
+            return public_latest(client, env!("CARGO_PKG_VERSION"))
+        }
         Err(ureq::Error::Status(404, _)) => {
             // GitHub uses 404 for both a hidden repository and a missing stable release.
             return match client.api("", accept).call() {
@@ -281,14 +350,14 @@ fn download(
 ) -> io::Result<PathBuf> {
     let mut checksum_bytes = Vec::new();
     client
-        .asset(release.checksum.id)?
+        .asset(release, &release.checksum)?
         .into_reader()
         .take(4097)
         .read_to_end(&mut checksum_bytes)?;
     if let Some(signature) = &release.signature {
         let mut bytes = Vec::new();
         client
-            .asset(signature.id)?
+            .asset(release, signature)?
             .into_reader()
             .take(65)
             .read_to_end(&mut bytes)?;
@@ -306,10 +375,15 @@ fn download(
         .write(true)
         .open(&path)?;
     let result = (|| {
+        let limit = if release.installer.size == 0 {
+            MAX_INSTALLER
+        } else {
+            release.installer.size
+        };
         let mut reader = client
-            .asset(release.installer.id)?
+            .asset(release, &release.installer)?
             .into_reader()
-            .take(release.installer.size + 1);
+            .take(limit + 1);
         let mut hash = Sha256::new();
         let mut total = 0;
         let mut buffer = [0; 65536];
@@ -319,13 +393,16 @@ fn download(
                 break;
             }
             total += count as u64;
-            if total > release.installer.size {
-                return Err(io::Error::other("installer exceeded advertised size"));
+            if total > limit {
+                return Err(io::Error::other("installer exceeded size limit"));
             }
             hash.update(&buffer[..count]);
             file.write_all(&buffer[..count])?;
         }
-        if total != release.installer.size || format!("{:x}", hash.finalize()) != expected {
+        if total == 0
+            || (release.installer.size != 0 && total != release.installer.size)
+            || format!("{:x}", hash.finalize()) != expected
+        {
             return Err(io::Error::other("installer checksum/size mismatch"));
         }
         file.sync_all()?;
