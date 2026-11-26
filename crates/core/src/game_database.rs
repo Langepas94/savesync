@@ -135,6 +135,7 @@ fn convert(game: &Game, installed: &HashSet<u32>) -> Option<Manifest> {
         name: game.name.clone(),
         slug: slugify(&game.name),
         catalog_key: None,
+        installed_at: None,
         aliases: game.aliases.clone(),
         ids: Ids {
             steam: game.ids.clone(),

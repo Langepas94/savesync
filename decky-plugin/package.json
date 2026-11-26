@@ -1,6 +1,6 @@
 {
   "name": "savesync-decky",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "SaveSync Decky plugin: sync status and manual trigger in Quick Access",
   "license": "GPL-3.0-or-later",
   "private": true,

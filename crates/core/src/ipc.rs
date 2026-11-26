@@ -32,13 +32,19 @@ pub enum Method {
     Lan {
         action: crate::lan::LanAction,
     },
+    LanPresence,
     OAuthBegin {
         provider: crate::oauth::Provider,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        client_id: Option<String>,
     },
     OAuthPoll {
         provider: crate::oauth::Provider,
     },
     OAuthCancel {
+        provider: crate::oauth::Provider,
+    },
+    CloudCheck {
         provider: crate::oauth::Provider,
     },
     /// Ручная синхронизация (MVP-триггер). `None` — все игры.
@@ -58,6 +64,7 @@ pub enum Method {
     Backup {
         game_key: String,
     },
+    BackupAll,
     /// Текущий конфиг (каналы, бэкапы, пути).
     GetConfig,
     /// Сохранить конфиг (каналы/бэкапы/пути). Демон перечитывает его
@@ -136,6 +143,7 @@ pub struct RpcError {
 pub enum ResponsePayload {
     Stopped,
     Lan(crate::lan::LanPayload),
+    LanPresence(Vec<String>),
     OAuthStart(OAuthStartPayload),
     OAuthStatus(OAuthStatusPayload),
     Status(StatusPayload),
@@ -143,6 +151,7 @@ pub enum ResponsePayload {
     Sync(SyncPayload),
     History(HistoryPayload),
     Backup(BackupPayload),
+    BackupBatch(BackupBatchPayload),
     Config(ConfigPayload),
 }
 
@@ -161,6 +170,8 @@ pub struct OAuthStatusPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HistoryPayload {
     pub game_key: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub install_paths: Vec<String>,
     #[serde(default)]
     pub local_files: Vec<LocalSaveFile>,
     pub versions: Vec<VersionEntry>,
@@ -183,13 +194,32 @@ pub struct VersionEntry {
     pub parent: Option<String>,
     pub created_at: u64,
     pub device: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_name: Option<String>,
     pub hash: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_count: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BackupPayload {
     pub game_key: String,
     pub file: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackupBatchPayload {
+    pub created: usize,
+    pub directory: String,
+    pub errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackupSummary {
+    pub created_at: u64,
+    pub directory: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -207,6 +237,8 @@ pub struct StatusPayload {
     pub games: Vec<GameStatus>,
     #[serde(default)]
     pub hidden_games: Vec<GameStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_backup: Option<BackupSummary>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

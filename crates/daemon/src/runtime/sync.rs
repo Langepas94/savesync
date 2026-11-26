@@ -47,6 +47,9 @@ impl Runtime {
                 ));
             }
         }
+        if results.iter().any(|result| result.outcome == "applied") {
+            self.refresh_catalog();
+        }
         ResponsePayload::Sync(SyncPayload { results })
     }
 }

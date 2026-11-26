@@ -91,6 +91,7 @@ pub fn manifest_from_entry(entry: &AppInfoEntry) -> Option<crate::manifest::Mani
         name: name.into(),
         slug: crate::game_key::slugify(name),
         catalog_key: None,
+        installed_at: None,
         aliases: vec![name.into()],
         ids: Ids {
             steam: vec![entry.appid.to_string()],

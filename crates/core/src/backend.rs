@@ -26,6 +26,12 @@ pub trait Backend {
         self.put_index(data)
     }
     fn name(&self) -> &'static str;
+    fn verify_access(&self) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "access check is unavailable",
+        ))
+    }
 }
 
 /// Каналы независимы (plan §3): движок может работать поверх набора

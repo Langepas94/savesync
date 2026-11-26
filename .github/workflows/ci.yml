@@ -139,6 +139,7 @@ jobs:
       - run: cargo build --release --locked --workspace
         env:
           SAVESYNC_UPDATE_PUBLIC_KEY: ${{ vars.SAVESYNC_UPDATE_PUBLIC_KEY }}
+          SAVESYNC_YANDEX_PUBLIC_CLIENT_ID: ${{ vars.SAVESYNC_YANDEX_PUBLIC_CLIENT_ID }}
       - run: npm ci --prefix decky-plugin
       - run: npm run build --prefix decky-plugin
       - run: bash packaging/package-steamos.sh target/release dist
@@ -172,6 +173,7 @@ jobs:
     runs-on: windows-latest
     env:
       SAVESYNC_UPDATE_PUBLIC_KEY: ${{ vars.SAVESYNC_UPDATE_PUBLIC_KEY }}
+      SAVESYNC_YANDEX_PUBLIC_CLIENT_ID: ${{ vars.SAVESYNC_YANDEX_PUBLIC_CLIENT_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

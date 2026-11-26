@@ -95,6 +95,7 @@ impl Updates {
     pub fn view(&mut self, ui: &mut egui::Ui, busy: bool) {
         ui.heading("Обновления");
         ui.label(format!("SaveSync {}", env!("CARGO_PKG_VERSION")));
+        ui.small("Автоматическая проверка при запуске и каждые 24 часа работы приложения.");
         if self.job.is_some() {
             ui.spinner();
         }

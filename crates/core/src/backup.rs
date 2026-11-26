@@ -16,6 +16,11 @@ use crate::snapshot;
 /// Расширение переносимого файла бэкапа.
 pub const BACKUP_EXT: &str = "savesync-backup";
 
+pub(crate) fn is_backup_archive(path: &Path) -> bool {
+    path.extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case(BACKUP_EXT))
+}
+
 /// Информация о файле бэкапа (из manifest.json внутри).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackupInfo {

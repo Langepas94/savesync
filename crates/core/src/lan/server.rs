@@ -16,11 +16,14 @@ pub struct LanServer {
 }
 impl LanServer {
     pub fn start(store: PathBuf, port: u16, _legacy_pin: &str) -> io::Result<Self> {
+        Self::start_named(store, port, &crate::config::hostname())
+    }
+    pub fn start_named(store: PathBuf, port: u16, device_name: &str) -> io::Result<Self> {
         let directory = store
             .parent()
             .unwrap_or_else(|| Path::new("."))
             .join("lan-identity");
-        Self::start_with_identity(store, port, &directory, true)
+        Self::start_inner(store, port, &directory, true, device_name)
     }
     pub fn start_with_identity(
         store: PathBuf,
@@ -28,7 +31,23 @@ impl LanServer {
         directory: &Path,
         advertise: bool,
     ) -> io::Result<Self> {
+        Self::start_inner(
+            store,
+            port,
+            directory,
+            advertise,
+            &crate::config::hostname(),
+        )
+    }
+    fn start_inner(
+        store: PathBuf,
+        port: u16,
+        directory: &Path,
+        advertise: bool,
+        device_name: &str,
+    ) -> io::Result<Self> {
         let identity = Arc::new(Identity::open(directory)?);
+        let device_name: Arc<str> = device_name.into();
         let window = Arc::new(Mutex::new(None));
         let runtime = runtime()?;
         let endpoint = {
@@ -40,7 +59,7 @@ impl LanServer {
         };
         let port = endpoint.local_addr()?.port();
         let service = if advertise {
-            discovery::Advertisement::start(&identity.id(), &crate::config::hostname(), port).ok()
+            discovery::Advertisement::start(&identity.id(), &device_name, port).ok()
         } else {
             None
         };
@@ -57,11 +76,13 @@ impl LanServer {
                     let identity = identity.clone();
                     let store = store.clone();
                     let window = server_window.clone();
+                    let device_name = device_name.clone();
                     tokio::spawn(async move {
                         let _permit = permit;
                         let _ = tokio::time::timeout(Duration::from_secs(30), async move {
                             let connection = incoming.await.map_err(error)?;
-                            let result = handle(&connection, &identity, &store, &window).await;
+                            let result =
+                                handle(&connection, &identity, &store, &window, &device_name).await;
                             if result.is_err() {
                                 connection.close(1u32.into(), b"authentication or request failed");
                             }
@@ -82,6 +103,9 @@ impl LanServer {
     }
     pub fn open_pairing(&self, pin: &str) -> io::Result<()> {
         pairing::open(&self.window, pin)
+    }
+    pub fn active_pin(&self) -> Option<String> {
+        pairing::active_pin(&self.window)
     }
     pub fn close_pairing(&self) {
         if let Ok(mut window) = self.window.lock() {
@@ -106,6 +130,7 @@ async fn handle(
     identity: &Identity,
     store: &Path,
     window: &PairingWindow,
+    device_name: &str,
 ) -> io::Result<()> {
     let (mut send, mut receive) = connection.accept_bi().await.map_err(error)?;
     let hello: Hello = tokio::time::timeout(Duration::from_secs(5), receive_value(&mut receive))
@@ -116,11 +141,11 @@ async fn handle(
             pairing::accept(
                 identity,
                 connection,
-                &mut send,
-                &mut receive,
+                (&mut send, &mut receive),
                 peer,
                 spake,
                 window,
+                device_name,
             )
             .await?;
             send.finish().map_err(error)?;

@@ -41,6 +41,9 @@ pub struct Manifest {
     /// The catalog identity previously confirmed for a local custom rule.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub catalog_key: Option<String>,
+    /// Installation detected on this device. Never stored in shared manifests.
+    #[serde(skip)]
+    pub installed_at: Option<std::path::PathBuf>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub aliases: Vec<String>,
     #[serde(default, skip_serializing_if = "Ids::is_empty")]
@@ -153,6 +156,7 @@ impl Manifest {
             name: name.to_string(),
             slug: crate::game_key::custom_key(name),
             catalog_key: None,
+            installed_at: None,
             aliases: Vec::new(),
             ids: Ids::default(),
             paths,

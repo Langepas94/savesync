@@ -11,3 +11,4 @@ savesync-core = { path = "../core" }
 serde.workspace = true
 serde_json.workspace = true
 interprocess.workspace = true
+if-addrs = "0.14"

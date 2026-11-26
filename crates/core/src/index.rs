@@ -49,7 +49,21 @@ pub struct Version {
     pub merged_parents: Vec<String>,
     pub created_at: u64,
     pub device: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_name: Option<String>,
     pub hash: String,
+}
+
+impl Version {
+    /// The optional display name can be absent when a 1.x client republishes a record.
+    pub(crate) fn same_record(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.parent == other.parent
+            && self.merged_parents == other.merged_parents
+            && self.created_at == other.created_at
+            && self.device == other.device
+            && self.hash == other.hash
+    }
 }
 
 /// Индекс одной игры.
@@ -193,7 +207,15 @@ impl Index {
         for (game_key, other_game) in &other.games {
             let game = self.game_mut(game_key);
             for v in &other_game.versions {
-                if game.get(&v.id).is_none() {
+                if let Some(existing) = game
+                    .versions
+                    .iter_mut()
+                    .find(|existing| existing.id == v.id)
+                {
+                    if existing.device_name.is_none() && existing.same_record(v) {
+                        existing.device_name = v.device_name.clone();
+                    }
+                } else {
                     game.versions.push(v.clone());
                 }
             }

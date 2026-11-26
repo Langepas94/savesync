@@ -38,7 +38,25 @@ pub(crate) fn validate_result(
                 .unwrap_or_else(|| "OAuth error".into()));
         }
     }
+    if let ResponsePayload::BackupBatch(batch) = &payload {
+        if !batch.errors.is_empty() {
+            return Err(format!(
+                "Создано бэкапов: {}. {}",
+                batch.created,
+                batch.errors.join("\n")
+            ));
+        }
+    }
     if let ResponsePayload::Sync(sync) = &payload {
+        // Restore tries each channel in order and stops at the first success.
+        if let Method::Restore { game_key, .. } = method {
+            if sync.results.last().is_some_and(|result| {
+                &result.game_key == game_key
+                    && matches!(result.outcome.as_str(), "applied" | "up_to_date")
+            }) {
+                return Ok(payload);
+            }
+        }
         let failures: Vec<_> = sync
             .results
             .iter()
@@ -61,34 +79,32 @@ pub(crate) fn validate_result(
             return Err(failures.join("\n"));
         }
     }
-    let valid = match (method, &payload) {
-        (Method::Lan { .. }, ResponsePayload::Lan(_)) => true,
-        (Method::OAuthBegin { .. }, ResponsePayload::OAuthStart(_))
-        | (
-            Method::OAuthPoll { .. } | Method::OAuthCancel { .. },
-            ResponsePayload::OAuthStatus(_),
-        )
-        | (Method::Status, ResponsePayload::Status(_))
-        | (
-            Method::Scan
-            | Method::ReloadManifests
-            | Method::AddCustomGame { .. }
-            | Method::SetGameHidden { .. },
-            ResponsePayload::Scan(_),
-        )
-        | (Method::History { .. }, ResponsePayload::History(_))
-        | (Method::Backup { .. }, ResponsePayload::Backup(_))
-        | (Method::GetConfig | Method::SaveConfig { .. }, ResponsePayload::Config(_)) => true,
-        (Method::Sync { .. }, ResponsePayload::Sync(_)) => true,
-        (Method::Restore { .. }, ResponsePayload::Sync(sync)) => {
-            !sync.results.is_empty()
-                && sync
-                    .results
-                    .iter()
-                    .all(|result| matches!(result.outcome.as_str(), "applied" | "up_to_date"))
-        }
-        _ => false,
-    };
+    let valid = matches!(
+        (method, &payload),
+        (Method::Lan { .. }, ResponsePayload::Lan(_))
+            | (Method::LanPresence, ResponsePayload::LanPresence(_))
+            | (Method::OAuthBegin { .. }, ResponsePayload::OAuthStart(_))
+            | (
+                Method::OAuthPoll { .. } | Method::OAuthCancel { .. } | Method::CloudCheck { .. },
+                ResponsePayload::OAuthStatus(_),
+            )
+            | (Method::Status, ResponsePayload::Status(_))
+            | (
+                Method::Scan
+                    | Method::ReloadManifests
+                    | Method::AddCustomGame { .. }
+                    | Method::SetGameHidden { .. },
+                ResponsePayload::Scan(_),
+            )
+            | (Method::History { .. }, ResponsePayload::History(_))
+            | (Method::Backup { .. }, ResponsePayload::Backup(_))
+            | (Method::BackupAll, ResponsePayload::BackupBatch(_))
+            | (
+                Method::GetConfig | Method::SaveConfig { .. },
+                ResponsePayload::Config(_)
+            )
+            | (Method::Sync { .. }, ResponsePayload::Sync(_))
+    );
     if valid {
         Ok(payload)
     } else {
@@ -149,5 +165,26 @@ mod tests {
         )
         .is_err());
         assert!(validate_result(&Method::GetConfig, payload).is_err());
+    }
+
+    #[test]
+    fn restore_can_succeed_using_a_later_channel() {
+        let method = Method::Restore {
+            game_key: "game".into(),
+            version_id: "v1".into(),
+        };
+        let results = vec![
+            SyncResult {
+                game_key: "game".into(),
+                outcome: "error".into(),
+                detail: Some("copy unavailable".into()),
+            },
+            SyncResult {
+                game_key: "game".into(),
+                outcome: "applied".into(),
+                detail: None,
+            },
+        ];
+        assert!(validate_result(&method, ResponsePayload::Sync(SyncPayload { results })).is_ok());
     }
 }

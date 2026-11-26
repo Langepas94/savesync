@@ -146,7 +146,7 @@ impl<B: Backend> Engine<B> {
                 "empty restore snapshot".into(),
             ));
         }
-        self.cache_snapshot(game_key, version_id_, &std::fs::read(&snap_path)?)?;
+        self.cache_received_snapshot(game_key, version_id_, &std::fs::read(&snap_path)?)?;
 
         // Базы локаций на ЭТОМ устройстве: паттерн -> резолв -> база.
         let mut skipped = Vec::new();
@@ -231,6 +231,7 @@ impl<B: Backend> Engine<B> {
                     merged_parents: heads.into_iter().filter(|id| id != version_id_).collect(),
                     created_at: stamp,
                     device: self.device_id.clone(),
+                    device_name: self.device_name.clone(),
                     hash: selected.hash.clone(),
                 };
                 self.cache_snapshot(

@@ -103,6 +103,9 @@ fn sync_uploads_then_second_device_applies() {
         panic!("expected history")
     };
     let remote = history.versions.iter().find(|v| v.device == "pc").unwrap();
+    assert_eq!(remote.channel.as_deref(), Some("fs"));
+    assert_eq!(remote.device_name.as_deref(), Some("pc"));
+    assert_eq!(remote.file_count, Some(1));
     assert_eq!(
         sync_results(deck.restore("test-game", &remote.id))[0].outcome,
         "applied"
@@ -236,7 +239,10 @@ fn sync_rescans_globs_after_initial_scan() {
 
 #[test]
 fn saving_config_updates_and_disables_live_lan_listener() {
-    use savesync_core::{config::LanConfig, lan::LanBackend};
+    use savesync_core::{
+        config::LanConfig,
+        lan::{self, LanAction, LanBackend},
+    };
     let world = World::new("live-lan-config");
     let mut pc = world.device("pc");
     pc.start_lan().unwrap();
@@ -250,22 +256,38 @@ fn saving_config_updates_and_disables_live_lan_listener() {
     let port = pc.lan_server.as_ref().unwrap().port;
     let address = format!("127.0.0.1:{port}");
     let identity = world.dir.join("client-identity");
-    pc.lan_server
-        .as_ref()
-        .unwrap()
-        .open_pairing("123456")
-        .unwrap();
-    let offer = savesync_core::lan::pair(&identity, &address, "123456").unwrap();
-    savesync_core::lan::confirm(&identity, &offer.peer_id).unwrap();
-    let server_identity = pc.state_dir.join("lan-identity");
-    let client_id = savesync_core::lan::peers(&server_identity).unwrap()[0]
-        .peer
-        .id
-        .clone();
-    savesync_core::lan::confirm(&server_identity, &client_id).unwrap();
+    let ResponsePayload::Lan(invitation) = pc.lan_action(LanAction::Invite) else {
+        panic!()
+    };
+    let pin = invitation.invitation_pin.unwrap();
+    let ResponsePayload::Lan(status) = pc.lan_action(LanAction::Status) else {
+        panic!()
+    };
+    assert_eq!(status.invitation_pin.as_deref(), Some(pin.as_str()));
+    let offer = lan::pair_named(&identity, &address, &pin, "Steam Deck").unwrap();
+    lan::confirm(&identity, &offer.peer_id).unwrap();
+    assert_eq!(
+        lan::peers(&identity).unwrap()[0].peer.name.as_deref(),
+        Some("pc")
+    );
+    let ResponsePayload::Lan(status) = pc.lan_action(LanAction::Status) else {
+        panic!()
+    };
+    assert!(status.invitation_pin.is_none());
+    assert_eq!(status.peers[0].peer.name.as_deref(), Some("Steam Deck"));
+    assert_eq!(status.peers[0].sas.as_deref(), Some(offer.sas.as_str()));
+    let client_id = status.peers[0].peer.id.clone();
+    let ResponsePayload::Lan(status) = pc.lan_action(LanAction::Confirm { peer_id: client_id })
+    else {
+        panic!()
+    };
+    assert!(status.peers[0].confirmed);
     assert!(LanBackend::with_identity(&address, &identity)
         .ping()
         .is_ok());
+    let peer = &lan::peers(&identity).unwrap()[0].peer;
+    assert!(LanBackend::ping_peer(&identity, &address, &peer.public_key).is_ok());
+    assert!(LanBackend::ping_peer(&identity, &address, &[0; 32]).is_err());
     let mut config = pc.config.clone();
     let lan = config.backends.lan.as_mut().unwrap();
     lan.port = port;
@@ -412,6 +434,11 @@ fn installed_game_lists_relocated_profile_slot_in_history() {
     let ResponsePayload::History(history) = deck.history("sample-install") else {
         panic!("expected history")
     };
+    assert_eq!(history.install_paths.len(), 1);
+    assert_eq!(
+        savesync_core::paths::canonical_path(std::path::Path::new(&history.install_paths[0])),
+        savesync_core::paths::canonical_path(&install)
+    );
     assert_eq!(history.local_files.len(), 1);
     assert_eq!(
         savesync_core::paths::canonical_path(std::path::Path::new(&history.local_files[0].path)),
@@ -421,6 +448,37 @@ fn installed_game_lists_relocated_profile_slot_in_history() {
         sync_results(deck.sync(Some("sample-install")))[0].outcome,
         "uploaded"
     );
+}
+
+#[test]
+fn changed_backup_directory_applies_to_the_next_batch() {
+    let world = World::new("backup-directory");
+    let mut pc = world.device("pc");
+    let initial = world.dir.join("first");
+    let next = world.dir.join("second");
+    let manifests = world.dir.join("manifests");
+    std::fs::create_dir_all(&manifests).unwrap();
+    std::fs::write(
+        manifests.join("test-game.yaml"),
+        "schema: 1\nname: Test Game\nslug: test-game\npaths:\n  - pattern: '<home>/game/saves'\n",
+    )
+    .unwrap();
+    pc.config.manifests_dir = Some(manifests);
+    pc.config.backups.dir = Some(initial.clone());
+    let ResponsePayload::BackupBatch(backup) = pc.backup_all() else {
+        panic!("expected batch");
+    };
+    assert_eq!(backup.created, 1);
+    assert!(backup.errors.is_empty());
+    let mut config = pc.config.clone();
+    config.backups.dir = Some(next.clone());
+    assert!(matches!(pc.save_config(config), ResponsePayload::Config(_)));
+    assert!(next.is_dir());
+    assert_eq!(pc.run_auto_backup().unwrap(), 1);
+    assert_eq!(PathBuf::from(pc.last_backup().unwrap().directory), next);
+    for directory in [initial, next] {
+        assert_eq!(std::fs::read_dir(directory).unwrap().count(), 1);
+    }
 }
 
 #[test]

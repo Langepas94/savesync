@@ -1,4 +1,38 @@
 use super::*;
+
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct SnapshotDetails {
+    channel: Option<String>,
+    file_count: Option<usize>,
+}
+
+fn snapshot_path(state: &Path, game: &str, version: &str) -> io::Result<PathBuf> {
+    crate::storage_paths::validate_version(version)?;
+    Ok(state
+        .join("snapshots")
+        .join(crate::storage_paths::game_component(game)?)
+        .join(format!("{version}.zip")))
+}
+
+fn read_details(path: &Path) -> SnapshotDetails {
+    std::fs::read(path.with_extension("details.json"))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+pub fn snapshot_details(
+    state: &Path,
+    game: &str,
+    version: &str,
+) -> (Option<String>, Option<usize>) {
+    let details = snapshot_path(state, game, version)
+        .ok()
+        .map(|path| read_details(&path))
+        .unwrap_or_default();
+    (details.channel, details.file_count)
+}
+
 impl<B: Backend> Engine<B> {
     pub(super) fn state_guard(&self) -> io::Result<std::fs::File> {
         file_transaction::state_guard(&self.state_dir)
@@ -61,18 +95,55 @@ impl<B: Backend> Engine<B> {
     }
 
     pub(super) fn cache_path(&self, game: &str, version: &str) -> io::Result<PathBuf> {
-        crate::storage_paths::validate_version(version)?;
-        Ok(self
-            .state_dir
-            .join("snapshots")
-            .join(crate::storage_paths::game_component(game)?)
-            .join(format!("{version}.zip")))
+        snapshot_path(&self.state_dir, game, version)
     }
 
     pub(super) fn cache_snapshot(&self, game: &str, version: &str, data: &[u8]) -> io::Result<()> {
+        self.cache_snapshot_with_source(game, version, data, None)
+    }
+
+    pub(super) fn cache_received_snapshot(
+        &self,
+        game: &str,
+        version: &str,
+        data: &[u8],
+    ) -> io::Result<()> {
+        self.cache_snapshot_with_source(
+            game,
+            version,
+            data,
+            Some(self.history_channel.unwrap_or_else(|| self.backend.name())),
+        )
+    }
+
+    fn cache_snapshot_with_source(
+        &self,
+        game: &str,
+        version: &str,
+        data: &[u8],
+        source: Option<&str>,
+    ) -> io::Result<()> {
         let path = self.cache_path(game, version)?;
         std::fs::create_dir_all(path.parent().unwrap())?;
-        std::fs::write(path, data)
+        std::fs::write(&path, data)?;
+        let mut details = read_details(&path);
+        if details.file_count.is_none() {
+            if let Ok(manifest) = snapshot::read_manifest(&path) {
+                details.file_count = Some(
+                    manifest
+                        .locations
+                        .iter()
+                        .map(|location| location.files.len())
+                        .sum(),
+                );
+                details.channel = source.map(str::to_owned);
+                // Presentation metadata is optional and never blocks syncing older clients.
+                if let Ok(bytes) = serde_json::to_vec(&details) {
+                    let _ = std::fs::write(path.with_extension("details.json"), bytes);
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Backfill snapshots from the source channel when upgrading an older index
@@ -86,7 +157,7 @@ impl<B: Backend> Engine<B> {
             for version in &history.versions {
                 if !self.cache_path(game, &version.id)?.exists() {
                     match self.backend.get_snapshot(game, &version.id) {
-                        Ok(bytes) => self.cache_snapshot(game, &version.id, &bytes)?,
+                        Ok(bytes) => self.cache_received_snapshot(game, &version.id, &bytes)?,
                         Err(error) => {
                             eprintln!("history cache: {game}/{} unavailable: {error}", version.id)
                         }

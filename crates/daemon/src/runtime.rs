@@ -95,5 +95,7 @@ mod sync;
 mod tests;
 
 mod authorization;
+pub(crate) use authorization::cloud_check;
 
 mod networking;
+pub(crate) use networking::lan_presence;

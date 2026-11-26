@@ -58,6 +58,7 @@ impl<B: Backend> Engine<B> {
             id: id.clone(),
             created_at: manifest.created_at,
             device: self.device_id.clone(),
+            device_name: self.device_name.clone(),
             hash: manifest.content_hash,
         };
 

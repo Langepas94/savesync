@@ -1,5 +1,27 @@
 use super::*;
 impl Runtime {
+    pub fn last_backup(&self) -> Option<savesync_core::ipc::BackupSummary> {
+        let bytes = std::fs::read(self.state_dir.join("last-backup.json")).ok()?;
+        serde_json::from_slice(&bytes).ok()
+    }
+
+    pub fn record_backup(&self, directory: &std::path::Path) {
+        use savesync_core::ipc::BackupSummary;
+        let summary = BackupSummary {
+            created_at: savesync_core::snapshot::now_millis(),
+            directory: directory.display().to_string(),
+        };
+        let result = (|| -> io::Result<()> {
+            std::fs::create_dir_all(&self.state_dir)?;
+            let temporary = self.state_dir.join("last-backup.tmp");
+            std::fs::write(&temporary, serde_json::to_vec(&summary)?)?;
+            std::fs::rename(temporary, self.state_dir.join("last-backup.json"))
+        })();
+        if let Err(error) = result {
+            eprintln!("last backup metadata: {error}");
+        }
+    }
+
     /// Переносимый бэкап игры в `backups.dir` (+ retention).
     pub fn backup_game(&mut self, game_key: &str) -> ResponsePayload {
         use savesync_core::ipc::BackupPayload;
@@ -40,6 +62,7 @@ impl Runtime {
             Ok(file) => {
                 let keep = self.config.backups.keep.unwrap_or(10) as usize;
                 let _ = savesync_core::backup::prune_backup_files(&dir, game_key, keep);
+                self.record_backup(&dir);
                 ResponsePayload::Backup(BackupPayload {
                     game_key: game_key.into(),
                     file: file.display().to_string(),

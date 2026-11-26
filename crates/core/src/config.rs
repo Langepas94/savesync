@@ -99,6 +99,20 @@ pub struct BackupsSettings {
     pub auto_interval_hours: Option<u32>,
 }
 
+impl BackupsSettings {
+    fn for_profile(path: &Path) -> Self {
+        Self {
+            dir: Some(
+                path.parent()
+                    .unwrap_or_else(|| Path::new("."))
+                    .join("backups"),
+            ),
+            keep: Some(10),
+            auto_interval_hours: Some(24),
+        }
+    }
+}
+
 impl Config {
     pub fn load(path: &Path) -> io::Result<Option<Config>> {
         match std::fs::read(path) {
@@ -112,17 +126,30 @@ impl Config {
 
     /// Загружает конфиг или создаёт новый (генерируя device_id).
     pub fn load_or_init(path: &Path) -> io::Result<Config> {
-        if let Some(cfg) = Self::load(path)? {
+        if let Some(mut cfg) = Self::load(path)? {
             let legacy = cfg.backends.google.as_ref().is_some_and(|backend| {
                 !backend.token.is_empty() && !crate::credentials::is_reference(&backend.token)
             }) || cfg.backends.yandex.as_ref().is_some_and(|backend| {
                 !backend.token.is_empty() && !crate::credentials::is_reference(&backend.token)
             });
-            if legacy {
+            let initialize_backups = cfg.backups.dir.is_none();
+            if initialize_backups {
+                let defaults = BackupsSettings::for_profile(path);
+                if cfg.backups == BackupsSettings::default() {
+                    cfg.backups = defaults;
+                } else {
+                    cfg.backups.dir = defaults.dir;
+                }
+            }
+            if legacy || initialize_backups {
                 cfg.save(path)?;
-                return Self::load(path)?.ok_or_else(|| {
-                    io::Error::other("config disappeared during credential migration")
-                });
+                if initialize_backups {
+                    if let Some(directory) = &cfg.backups.dir {
+                        let _ = std::fs::create_dir_all(directory);
+                    }
+                }
+                return Self::load(path)?
+                    .ok_or_else(|| io::Error::other("config disappeared during migration"));
             }
             return Ok(cfg);
         }
@@ -132,9 +159,12 @@ impl Config {
             device_name: hostname(),
             manifests_dir: None,
             backends: BackendsConfig::default(),
-            backups: BackupsSettings::default(),
+            backups: BackupsSettings::for_profile(path),
         };
         cfg.save(path)?;
+        if let Some(directory) = &cfg.backups.dir {
+            let _ = std::fs::create_dir_all(directory);
+        }
         Ok(cfg)
     }
 
@@ -220,11 +250,20 @@ impl Config {
 
 /// Читаемое имя хоста (COMPUTERNAME / HOSTNAME), fallback — "device".
 pub fn hostname() -> String {
-    std::env::var("COMPUTERNAME")
-        .or_else(|_| std::env::var("HOSTNAME"))
-        .ok()
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| "device".into())
+    for key in ["COMPUTERNAME", "HOSTNAME"] {
+        if let Ok(value) = std::env::var(key) {
+            if !value.trim().is_empty() {
+                return value;
+            }
+        }
+    }
+    #[cfg(target_os = "linux")]
+    if let Ok(value) = std::fs::read_to_string("/proc/sys/kernel/hostname") {
+        if !value.trim().is_empty() {
+            return value.trim().to_owned();
+        }
+    }
+    "device".into()
 }
 
 /// Стабильный id: slug(hostname) + 8 hex от blake3(время, pid).
@@ -260,6 +299,12 @@ mod tests {
         let cfg = Config::load_or_init(&path).unwrap();
         assert_eq!(cfg.version, 1);
         assert!(!cfg.device_id.is_empty());
+        assert_eq!(cfg.backups.auto_interval_hours, Some(24));
+        assert_eq!(
+            cfg.backups.dir.as_deref(),
+            Some(dir.join("backups").as_path())
+        );
+        assert!(dir.join("backups").is_dir());
 
         // Повторная загрузка — тот же device_id (стабильность).
         let cfg2 = Config::load_or_init(&path).unwrap();

@@ -10,157 +10,119 @@ pub(super) struct AddGameForm {
 
 impl SaveSyncApp {
     pub(super) fn view_games(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.heading("Игры");
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .add_enabled(!self.busy(), egui::Button::new("Синхронизировать всё"))
-                    .clicked()
-                {
-                    self.sync_all();
-                }
-                if ui
-                    .add_enabled(!self.busy(), egui::Button::new("Обновить"))
-                    .clicked()
-                {
-                    self.refresh_games();
-                }
-                if ui
-                    .add_enabled(
-                        self.daemon_ok && !self.busy() && self.add_game.is_none(),
-                        egui::Button::new("Добавить игру"),
-                    )
-                    .clicked()
-                {
-                    self.add_game = Some(AddGameForm::default());
-                }
-            });
+        if let Some(selected) = &self.selected {
+            egui::ScrollArea::vertical()
+                .id_salt(("game_detail", selected))
+                .show(ui, |ui| {
+                    self.view_detail(ui);
+                });
+            return;
+        }
+
+        ui.heading(RichText::new("Игры").size(27.0));
+        let mut opened_form = false;
+        ui.horizontal_wrapped(|ui| {
+            if ui
+                .add_enabled(
+                    self.daemon_ok && !self.busy() && self.add_game.is_none(),
+                    egui::Button::new("Добавить игру"),
+                )
+                .clicked()
+            {
+                self.add_game = Some(AddGameForm::default());
+                opened_form = true;
+            }
+            if ui
+                .add_enabled(!self.busy(), egui::Button::new("Обновить список"))
+                .clicked()
+            {
+                self.refresh_games();
+            }
+            if ui
+                .add_enabled(!self.busy(), primary_button("Синхронизировать всё"))
+                .clicked()
+            {
+                self.sync_all();
+            }
         });
         ui.separator();
-        self.view_add_game(ui);
 
         let games = self
             .status
             .as_ref()
             .map(|s| s.games.clone())
             .unwrap_or_default();
-        if games.is_empty() {
-            ui.label(RichText::new("Нажмите «Обновить» для поиска или «Добавить игру», чтобы указать сохранения вручную.").color(DIM));
-        }
-
-        let mut hide_one = None;
-        let mut sync_one = None;
-        let mut select_one = None;
-        egui::ScrollArea::both()
-            .id_salt("games")
-            .max_height(ui.available_height() * 0.45)
-            .show(ui, |ui| {
-                for g in &games {
-                    let is_sel = self.selected.as_deref() == Some(g.game_key.as_str());
-                    let frame = egui::Frame::group(ui.style()).fill(if is_sel {
-                        Color32::from_rgb(0x24, 0x35, 0x47)
-                    } else {
-                        PANEL
-                    });
-                    frame.show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new(&g.display_name).strong());
-                            ui.label(
-                                RichText::new(format!("версий: {}", g.versions))
-                                    .color(DIM)
-                                    .small(),
-                            );
-                            state_badge(ui, &g.state);
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    if ui.add_enabled(!self.busy(), egui::Button::new("Удалить")).on_hover_text("Убрать из списка и остановить синхронизацию на этом устройстве").clicked() {
-                                        hide_one = Some(g.game_key.clone());
-                                    }
-                                    if ui
-                                        .add_enabled(!self.busy(), egui::Button::new("Синк"))
-                                        .clicked()
-                                    {
-                                        sync_one = Some(g.game_key.clone());
-                                    }
-                                    if ui
-                                        .add_enabled(
-                                            !self.busy(),
-                                            egui::Button::new(if is_sel {
-                                                "Скрыть"
-                                            } else {
-                                                "Детали"
-                                            }),
-                                        )
-                                        .clicked()
-                                    {
-                                        select_one = Some(if is_sel {
-                                            None
-                                        } else {
-                                            Some(g.game_key.clone())
-                                        });
-                                    }
-                                },
-                            );
-                        });
-                    });
-                    ui.add_space(2.0);
-                }
-            });
-
-        if let Some(key) = hide_one {
-            if self.selected.as_deref() == Some(&key) {
-                self.selected = None;
-                self.history = None;
-            }
-            self.set_game_hidden(key, true);
-        }
         let hidden = self
             .status
             .as_ref()
             .map(|s| s.hidden_games.clone())
             .unwrap_or_default();
-        let mut restore = None;
-        if !hidden.is_empty() {
-            ui.collapsing("Удалённые из списка", |ui| {
-                ui.small("Сохранения и история остаются на месте.");
-                for game in hidden {
-                    ui.horizontal(|ui| {
-                        ui.label(&game.display_name);
-                        if ui
-                            .add_enabled(!self.busy(), egui::Button::new("Вернуть"))
-                            .clicked()
-                        {
-                            restore = Some(game.game_key);
-                        }
-                    });
-                }
-            });
+        let mut list = egui::ScrollArea::vertical()
+            .id_salt("library")
+            .auto_shrink([false, false]);
+        if opened_form {
+            list = list.vertical_scroll_offset(0.0);
         }
-        if let Some(key) = restore {
-            self.set_game_hidden(key, false);
-        }
-        if let Some(key) = sync_one {
-            self.sync_game(&key);
-        }
-        if let Some(sel) = select_one {
-            match sel {
-                Some(key) => {
-                    self.selected = Some(key.clone());
-                    self.load_history(&key);
-                }
-                None => {
-                    self.selected = None;
-                    self.history = None;
-                }
+        list.show(ui, |ui| {
+            self.view_add_game(ui);
+            if games.is_empty() {
+                ui.label("Обновите список или добавьте игру вручную.");
             }
-        }
-
-        ui.separator();
-        self.view_detail(ui);
+            for game in &games {
+                ui.push_id(&game.game_key, |ui| {
+                    let (state, color) = game_state(&game.state);
+                    let mut label = egui::text::LayoutJob::default();
+                    label.append(
+                        &game.display_name,
+                        0.0,
+                        egui::TextFormat {
+                            font_id: egui::FontId::proportional(16.0),
+                            color: ui.visuals().text_color(),
+                            ..Default::default()
+                        },
+                    );
+                    label.append(
+                        &format!("   •   {state}"),
+                        0.0,
+                        egui::TextFormat {
+                            font_id: egui::FontId::proportional(13.0),
+                            color,
+                            ..Default::default()
+                        },
+                    );
+                    if ui
+                        .add_enabled(
+                            !self.busy(),
+                            egui::Button::new(label)
+                                .min_size(egui::vec2(ui.available_width(), 39.0)),
+                        )
+                        .clicked()
+                    {
+                        self.selected = Some(game.game_key.clone());
+                        self.history_limit = 8;
+                        self.load_history(&game.game_key);
+                    }
+                });
+            }
+            if !hidden.is_empty() {
+                ui.collapsing("Удалённые из списка", |ui| {
+                    for game in hidden {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(&game.display_name);
+                            if ui
+                                .add_enabled(!self.busy(), egui::Button::new("Вернуть"))
+                                .clicked()
+                            {
+                                self.set_game_hidden(game.game_key, false);
+                            }
+                        });
+                    }
+                });
+            }
+        });
     }
 
-    fn set_game_hidden(&mut self, game_key: String, hidden: bool) {
+    pub(super) fn set_game_hidden(&mut self, game_key: String, hidden: bool) {
         self.start_job(
             "Обновление списка игр…",
             Method::SetGameHidden { game_key, hidden },
@@ -283,112 +245,6 @@ impl SaveSyncApp {
                 let message = if no_saves { "Игра добавлена. Сохранения не найдены." } else { "Игра добавлена" };
                 (message.into(), true, false)
             });
-        }
-    }
-
-    pub(super) fn view_detail(&mut self, ui: &mut egui::Ui) {
-        let Some(key) = self.selected.clone() else {
-            return;
-        };
-        ui.heading("Детали");
-        ui.horizontal(|ui| {
-            ui.label(RichText::new(&key).color(ACCENT));
-            if ui
-                .add_enabled(!self.busy(), egui::Button::new("Сделать бэкап"))
-                .clicked()
-            {
-                self.backup(&key);
-            }
-        });
-
-        let Some(h) = self.history.clone() else {
-            ui.label(RichText::new("нет истории").color(DIM));
-            return;
-        };
-        if h.game_key != key {
-            return;
-        }
-
-        ui.heading("Сохранения на этом устройстве");
-        if h.local_files.is_empty() {
-            ui.label(RichText::new("Файлы сохранений не найдены.").color(DIM));
-        } else {
-            egui::ScrollArea::vertical()
-                .id_salt("local_save_files")
-                .max_height(140.0)
-                .show(ui, |ui| {
-                    for file in &h.local_files {
-                        ui.label(&file.path);
-                        let modified = file
-                            .modified_at
-                            .map(|time| format!("{} UTC", fmt_ts(time)))
-                            .unwrap_or_else(|| "время неизвестно".into());
-                        ui.small(format!("{} байт · {}", file.size, modified));
-                    }
-                });
-        }
-        ui.separator();
-        ui.heading("История синхронизации");
-        if h.versions.is_empty() {
-            ui.label(RichText::new("На этом устройстве ещё нет снимков. Доступные на других устройствах версии появятся после синхронизации.").color(DIM));
-        }
-
-        // Конфликт-резолвер: больше одной головы.
-        if h.heads.len() > 1 {
-            egui::Frame::group(ui.style())
-                .fill(Color32::from_rgb(0x3a, 0x24, 0x24))
-                .show(ui, |ui| {
-                    ui.label(
-                        RichText::new(format!(
-                            "Конфликт: {} ветки. Выберите версию ниже — она станет общей.",
-                            h.heads.len()
-                        ))
-                        .color(WARN),
-                    );
-                });
-        }
-
-        let mut restore_id = None;
-        egui::ScrollArea::vertical()
-            .id_salt("history")
-            .show(ui, |ui| {
-                for v in h.versions.iter().rev() {
-                    egui::Frame::group(ui.style()).fill(PANEL).show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            let is_applied = h.applied.as_deref() == Some(v.id.as_str());
-                            let is_head = h.heads.contains(&v.id);
-                            ui.label(format!("{} UTC", fmt_ts(v.created_at)));
-                            ui.label(RichText::new(&v.device).color(DIM));
-                            ui.label(
-                                RichText::new(&v.id[..v.id.len().min(12)])
-                                    .color(DIM)
-                                    .monospace()
-                                    .small(),
-                            );
-                            if is_head {
-                                ui.label(RichText::new("голова").color(WARN).small());
-                            }
-                            if is_applied {
-                                ui.label(RichText::new("применена").color(OK).small());
-                            }
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    if ui
-                                        .add_enabled(!self.busy(), egui::Button::new("Применить"))
-                                        .clicked()
-                                    {
-                                        restore_id = Some(v.id.clone());
-                                    }
-                                },
-                            );
-                        });
-                    });
-                    ui.add_space(2.0);
-                }
-            });
-        if let Some(id) = restore_id {
-            self.restore(&key, &id);
         }
     }
 }

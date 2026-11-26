@@ -310,6 +310,7 @@ impl Runtime {
             daemon_version: env!("CARGO_PKG_VERSION").to_string(),
             device_id: self.config.device_id.clone(),
             device_name: self.config.device_name.clone(),
+            last_backup: self.last_backup(),
             games,
             hidden_games: self
                 .hidden_games

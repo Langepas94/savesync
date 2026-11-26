@@ -204,6 +204,7 @@ pub fn resolve_custom_with_identity(
     if resolved.1.is_none() && custom.catalog_key.is_some() {
         let (mut manifest, identity) = explicit();
         manifest.paths = resolved.0.paths;
+        manifest.installed_at = resolved.0.installed_at;
         (manifest, identity)
     } else {
         resolved
@@ -234,6 +235,9 @@ fn resolve_folder(
         .and_then(|name| name.to_str())
         .map(slugify);
     let is_installation = !executables.is_empty() || shortcut.is_some();
+    if is_installation {
+        result.installed_at = Some(folder.to_path_buf());
+    }
     let names: Vec<_> = if is_installation {
         shortcut
             .iter()

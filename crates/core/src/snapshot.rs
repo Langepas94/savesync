@@ -119,7 +119,7 @@ fn collect_files(base: &Path, hit: &Path, out: &mut Vec<(PathBuf, PathBuf)>) -> 
         for entry in std::fs::read_dir(hit)? {
             collect_files(base, &entry?.path(), out)?;
         }
-    } else if hit.is_file() {
+    } else if hit.is_file() && !crate::backup::is_backup_archive(hit) {
         let rel = hit.strip_prefix(base).map(PathBuf::from).map_err(|_| {
             io::Error::new(
                 io::ErrorKind::InvalidInput,
