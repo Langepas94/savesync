@@ -1,4 +1,4 @@
-//! Stable GitHub release checks and verified Windows installer handoff.
+//! Download and verify stable SaveSync updates from GitHub Releases.
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::{
@@ -144,7 +144,13 @@ fn select_for(bytes: &[u8], current: &str, package: &str) -> io::Result<Option<R
         .filter(|asset| asset.name == format!("{package}.sha256.sig"))
         .cloned()
         .collect();
-    if package != INSTALLER && (signatures.len() != 1 || signatures[0].size != 64) {
+    let needs_project_signature = package != INSTALLER || !windows_publisher_configured();
+    if signatures.len() > 1
+        || signatures
+            .first()
+            .is_some_and(|signature| signature.size != 64)
+        || (needs_project_signature && signatures.is_empty())
+    {
         return Err(io::Error::other("release signature missing or ambiguous"));
     }
     let url = url::Url::parse(&metadata.html_url).map_err(io::Error::other)?;
@@ -208,11 +214,15 @@ fn check_with(client: &Client) -> io::Result<ReleaseCheck> {
     })
 }
 pub fn automatic_updates_configured() -> bool {
-    (cfg!(windows)
+    windows_publisher_configured()
+        || (cfg!(any(windows, target_os = "linux")) && update_key().is_ok())
+}
+
+fn windows_publisher_configured() -> bool {
+    cfg!(windows)
         && option_env!("SAVESYNC_SIGNER_SHA256").is_some_and(|value| {
             value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
-        }))
-        || (cfg!(target_os = "linux") && update_key().is_ok())
+        })
 }
 fn checksum_for(bytes: &[u8], package: &str) -> io::Result<String> {
     let text = std::str::from_utf8(bytes).map_err(io::Error::other)?;
@@ -249,8 +259,26 @@ fn verify_checksum_signature(
     let sig = ed25519_dalek::Signature::from_slice(signature).map_err(io::Error::other)?;
     key.verify_strict(bytes, &sig).map_err(io::Error::other)
 }
-fn download(release: &Release, directory: &Path) -> io::Result<PathBuf> {
-    let client = Client::new();
+
+fn signed_checksum_message<'a>(
+    checksum: &'a [u8],
+    package: &str,
+    version: &semver::Version,
+) -> std::borrow::Cow<'a, [u8]> {
+    if package == INSTALLER {
+        let mut message = format!("SaveSync Windows update {version}\n").into_bytes();
+        message.extend_from_slice(checksum);
+        message.into()
+    } else {
+        checksum.into()
+    }
+}
+fn download(
+    client: &Client,
+    release: &Release,
+    directory: &Path,
+    trusted_key: impl FnOnce() -> io::Result<ed25519_dalek::VerifyingKey>,
+) -> io::Result<PathBuf> {
     let mut checksum_bytes = Vec::new();
     client
         .asset(release.checksum.id)?
@@ -264,7 +292,11 @@ fn download(release: &Release, directory: &Path) -> io::Result<PathBuf> {
             .into_reader()
             .take(65)
             .read_to_end(&mut bytes)?;
-        verify_checksum_signature(&update_key()?, &checksum_bytes, &bytes)?;
+        let message =
+            signed_checksum_message(&checksum_bytes, &release.installer.name, &release.version);
+        verify_checksum_signature(&trusted_key()?, &message, &bytes)?;
+    } else if release.installer.name != INSTALLER || !windows_publisher_configured() {
+        return Err(io::Error::other("signed update checksum required"));
     }
     let expected = checksum_for(&checksum_bytes, &release.installer.name)?;
     std::fs::create_dir_all(directory)?;
@@ -321,13 +353,15 @@ pub fn install(release: &Release) -> io::Result<()> {
             release.version,
             blake3::hash(oauth2::CsrfToken::new_random().secret().as_bytes()).to_hex()
         ));
-    let installer = download(release, &directory)?;
+    let installer = download(&Client::new(), release, &directory, update_key)?;
     launch_update(&installer, &release.version)?;
     Ok(())
 }
 #[cfg(windows)]
 fn launch_update(installer: &Path, version: &semver::Version) -> io::Result<()> {
-    verify_installer(installer, version)?;
+    if windows_publisher_configured() {
+        verify_installer(installer, version)?;
+    }
     std::process::Command::new(installer)
         .args(["/SILENT", "/NORESTART", "/STARTAFTERINSTALL=1"])
         .spawn()?;

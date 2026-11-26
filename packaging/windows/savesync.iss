@@ -19,12 +19,15 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0.10240
 OutputDir={#OutputDirectory}
-#ifdef Signed
+#ifdef ReleaseInstaller
 OutputBaseFilename=savesync-setup
+#else
+OutputBaseFilename=savesync-setup-dev
+#endif
+#ifdef Signed
 SignTool=savesync
 SignedUninstaller=yes
 #else
-OutputBaseFilename=savesync-setup-dev
 SignedUninstaller=no
 #endif
 Compression=lzma2

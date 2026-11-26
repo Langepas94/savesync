@@ -80,7 +80,7 @@ fn release_check_distinguishes_an_empty_release_feed_from_denied_access() {
 }
 
 fn metadata(tag: &str) -> serde_json::Value {
-    serde_json::json!({"tag_name":tag,"draft":false,"prerelease":false,"html_url":format!("https://github.com/Langepas94/savesync/releases/tag/{tag}"),"assets":[{"id":1,"name":INSTALLER,"size":100},{"id":2,"name":format!("{INSTALLER}.sha256"),"size":87}]})
+    serde_json::json!({"tag_name":tag,"draft":false,"prerelease":false,"html_url":format!("https://github.com/Langepas94/savesync/releases/tag/{tag}"),"assets":[{"id":1,"name":INSTALLER,"size":100},{"id":2,"name":format!("{INSTALLER}.sha256"),"size":87},{"id":3,"name":format!("{INSTALLER}.sha256.sig"),"size":64}]})
 }
 #[test]
 fn stable_semver_check_rejects_old_and_prerelease() {
@@ -146,6 +146,102 @@ fn signed_checksum_rejects_tampering_and_wrong_key() {
     assert!(verify_checksum_signature(&key.verifying_key(), b"tampered", &signature).is_err());
     let other = ed25519_dalek::SigningKey::from_bytes(&[4; 32]);
     assert!(verify_checksum_signature(&other.verifying_key(), bytes, &signature).is_err());
+}
+
+#[test]
+fn windows_project_signature_binds_the_release_version() {
+    use ed25519_dalek::Signer;
+    let key = ed25519_dalek::SigningKey::from_bytes(&[8; 32]);
+    let checksum = b"installer checksum";
+    let version = semver::Version::new(1, 0, 9);
+    let message = signed_checksum_message(checksum, INSTALLER, &version);
+    assert_eq!(
+        message.as_ref(),
+        b"SaveSync Windows update 1.0.9\ninstaller checksum"
+    );
+    let signature = key.sign(&message).to_bytes();
+    assert!(verify_checksum_signature(&key.verifying_key(), &message, &signature).is_ok());
+    let relabeled = signed_checksum_message(checksum, INSTALLER, &semver::Version::new(1, 0, 10));
+    assert!(verify_checksum_signature(&key.verifying_key(), &relabeled, &signature).is_err());
+}
+
+#[test]
+fn windows_update_download_requires_valid_signature_and_matching_installer() {
+    use ed25519_dalek::Signer;
+    use std::io::{BufRead, BufReader};
+    use std::net::TcpListener;
+
+    let key = ed25519_dalek::SigningKey::from_bytes(&[5; 32]);
+    let body = b"installer fixture";
+    let version = semver::Version::new(1, 0, 9);
+    let checksum = format!("{:x}  {INSTALLER}\n", Sha256::digest(body));
+    let signature = key.sign(&signed_checksum_message(
+        checksum.as_bytes(),
+        INSTALLER,
+        &version,
+    ));
+    let mut release_metadata = metadata("v1.0.9");
+    release_metadata["assets"][0]["size"] = body.len().into();
+    release_metadata["assets"][1]["size"] = checksum.len().into();
+    let release = select_for(
+        &serde_json::to_vec(&release_metadata).unwrap(),
+        "1.0.8",
+        INSTALLER,
+    )
+    .unwrap()
+    .unwrap();
+
+    for (signature_ok, installer_ok) in [(true, true), (true, false), (false, true)] {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let mut signature = signature.to_bytes();
+        if !signature_ok {
+            signature[0] ^= 1;
+        }
+        let mut responses = vec![(2, checksum.as_bytes().to_vec()), (3, signature.to_vec())];
+        if signature_ok {
+            let mut installer = body.to_vec();
+            if !installer_ok {
+                installer[0] ^= 1;
+            }
+            responses.push((1, installer));
+        }
+        let server = std::thread::spawn(move || {
+            for (id, bytes) in responses {
+                let (mut socket, _) = listener.accept().unwrap();
+                let request: Vec<_> = BufReader::new(&socket)
+                    .lines()
+                    .map(Result::unwrap)
+                    .take_while(|line| !line.is_empty())
+                    .collect();
+                assert_eq!(request[0], format!("GET /releases/assets/{id} HTTP/1.1"));
+                write!(
+                    socket,
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    bytes.len()
+                )
+                .unwrap();
+                socket.write_all(&bytes).unwrap();
+            }
+        });
+        let client = Client {
+            api_base: format!("http://{address}"),
+            agent: ureq::AgentBuilder::new()
+                .timeout(std::time::Duration::from_secs(2))
+                .build(),
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let result = download(&client, &release, directory.path(), || {
+            Ok(key.verifying_key())
+        });
+        server.join().unwrap();
+        if signature_ok && installer_ok {
+            assert_eq!(std::fs::read(result.unwrap()).unwrap(), body);
+        } else {
+            assert!(result.is_err());
+            assert!(!directory.path().join(INSTALLER).exists());
+        }
+    }
 }
 #[test]
 fn checksum_is_bound_to_expected_installer_name() {

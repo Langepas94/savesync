@@ -1,4 +1,4 @@
-param([string]$SourceDir = 'target/release', [string]$OutputDir = 'dist', [string]$Version = '', [switch]$Signed, [string]$Compiler)
+param([string]$SourceDir = 'target/release', [string]$OutputDir = 'dist', [string]$Version = '', [switch]$Signed, [switch]$Release, [string]$Compiler)
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 if (!$Version) {
@@ -18,6 +18,7 @@ foreach ($name in @('savesync-app.exe', 'savesync-daemon.exe')) {
     if (!(Test-Path -LiteralPath (Join-Path $source $name))) { throw "Missing $name" }
 }
 $arguments = @("/DAppVersion=$Version", "/DSourceDir=$source", "/DOutputDirectory=$output")
+if ($Release -or $Signed) { $arguments += '/DReleaseInstaller' }
 if ($Signed) {
     if (!$env:SAVESYNC_SIGNING_THUMBPRINT -or !$env:SAVESYNC_SIGNER_SHA256) { throw 'Signing identity was not prepared' }
     foreach ($name in @('savesync-app.exe', 'savesync-daemon.exe')) { & (Join-Path $PSScriptRoot 'sign.ps1') -Path (Join-Path $source $name) }
@@ -29,7 +30,7 @@ if ($Signed) {
 }
 & $Compiler @arguments (Join-Path $PSScriptRoot 'savesync.iss')
 if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed' }
-$name = if ($Signed) { 'savesync-setup.exe' } else { 'savesync-setup-dev.exe' }
+$name = if ($Signed -or $Release) { 'savesync-setup.exe' } else { 'savesync-setup-dev.exe' }
 $installer = Join-Path $output $name
 if ($Signed) {
     & (Get-Command pwsh.exe).Source -NoProfile -NonInteractive -File (Join-Path $repo 'crates/core/src/updates/verify-signer.ps1') -Path $installer -ExpectedSigner $env:SAVESYNC_SIGNER_SHA256 -ExpectedVersion $Version

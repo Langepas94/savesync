@@ -166,10 +166,12 @@ jobs:
             dist/SaveSync-SteamDeck.run*
 
   release:
-    name: signed Windows release
+    name: Windows release installer
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [fmt, clippy, test, decky-plugin, windows-installer, steamos-package]
     runs-on: windows-latest
+    env:
+      SAVESYNC_UPDATE_PUBLIC_KEY: ${{ vars.SAVESYNC_UPDATE_PUBLIC_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -185,18 +187,25 @@ jobs:
       - name: ensure release installer compiler
         shell: pwsh
         run: ./packaging/windows/ensure-compiler.ps1
-      - name: import Windows signing identity
+      - name: import Windows publisher identity when configured
         shell: pwsh
         env:
           SAVESYNC_SIGNING_PFX_BASE64: ${{ secrets.SAVESYNC_SIGNING_PFX_BASE64 }}
           SAVESYNC_SIGNING_PFX_PASSWORD: ${{ secrets.SAVESYNC_SIGNING_PFX_PASSWORD }}
-        run: ./packaging/windows/prepare-signing.ps1
+        run: |
+          if ($env:SAVESYNC_UPDATE_PUBLIC_KEY -notmatch '^[0-9a-fA-F]{64}$') { throw 'Project update key is missing' }
+          if ($env:SAVESYNC_SIGNING_PFX_BASE64 -or $env:SAVESYNC_SIGNING_PFX_PASSWORD) {
+            ./packaging/windows/prepare-signing.ps1
+          }
       - run: cargo build --release --locked --workspace
-      - name: build signed Windows package
+      - name: build Windows release installer
         shell: pwsh
         run: |
           $version = $env:GITHUB_REF_NAME.TrimStart('v')
-          ./packaging/windows/build.ps1 -SourceDir target/release -Version $version -Signed
+          ./packaging/windows/build.ps1 -SourceDir target/release -Version $version -Release -Signed:([bool]$env:SAVESYNC_SIGNER_SHA256)
+      - name: isolated release installer upgrade
+        shell: pwsh
+        run: ./packaging/windows/smoke.ps1 -Installer dist/savesync-setup.exe
       - uses: actions/upload-artifact@v4
         with:
           name: savesync-x86_64-pc-windows-msvc
@@ -215,6 +224,23 @@ jobs:
           pattern: savesync-x86_64-*
           path: artifacts
           merge-multiple: true
+      - name: sign Windows update for SaveSync
+        shell: bash
+        env:
+          UPDATE_PRIVATE_KEY: ${{ secrets.SAVESYNC_UPDATE_PRIVATE_KEY_BASE64 }}
+          UPDATE_PUBLIC_KEY: ${{ vars.SAVESYNC_UPDATE_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$UPDATE_PRIVATE_KEY" && test -n "$UPDATE_PUBLIC_KEY"
+          keyfile="$(mktemp)"
+          message="$(mktemp)"
+          trap 'rm -f "$keyfile" "$message"' EXIT
+          printf '%s' "$UPDATE_PRIVATE_KEY" | base64 -d > "$keyfile"
+          actual="$(openssl pkey -in "$keyfile" -pubout -outform DER | tail -c 32 | od -An -tx1 | tr -d ' \n')"
+          test "$actual" = "$UPDATE_PUBLIC_KEY"
+          (cd artifacts && sha256sum --check savesync-setup.exe.sha256)
+          { printf 'SaveSync Windows update %s\n' "${GITHUB_REF_NAME#v}"; cat artifacts/savesync-setup.exe.sha256; } > "$message"
+          openssl pkeyutl -sign -rawin -inkey "$keyfile" -in "$message" -out artifacts/savesync-setup.exe.sha256.sig
       - name: create reviewable release
         env:
           GH_TOKEN: ${{ github.token }}
